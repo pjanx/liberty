@@ -1,0 +1,20 @@
+liberty
+=======
+
+`liberty' is a pseudolibrary of all the common C code I have written for various
+projects.  It can be thought of as a successor to my other C library, libxtnd.
+
+You are supposed to import it as a git submodule and include the main source
+file directly everywhere you need it.  Everything is declared "static".  I have
+come to the conclusion that this style of C programming suits me the best, as it
+allows me to nearly forget about the mess that are header files.
+
+License
+-------
+`liberty' is written by Přemysl Janouch <p.janouch@gmail.com>.
+
+You may use the software under the terms of the ISC license, the text of which
+is included within the package, or, at your option, you may relicense the work
+under the MIT or the Modified BSD License, as listed at the following site:
+
+http://www.gnu.org/licenses/license-list.html

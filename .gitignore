@@ -1,0 +1,9 @@
+# Build files
+/build
+
+# Qt Creator files
+/CMakeLists.txt.user*
+/liberty.config
+/liberty.files
+/liberty.creator*
+/liberty.includes
