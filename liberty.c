@@ -276,7 +276,7 @@ xstrndup (const char *s, size_t n)
 // --- Double-linked list helpers ----------------------------------------------
 
 #define LIST_HEADER(type)                                                      \
-	type *next;                                                         \
+	type *next;                                                                \
 	type *prev;
 
 #define LIST_PREPEND(head, link)                                               \
