@@ -689,7 +689,7 @@ str_map_init (struct str_map *self)
 }
 
 static void
-str_map_free (struct str_map *self)
+str_map_clear (struct str_map *self)
 {
 	struct str_map_link **iter, **end = self->map + self->alloc;
 	struct str_map_link *link, *tmp;
@@ -703,6 +703,14 @@ str_map_free (struct str_map *self)
 			free (link);
 		}
 
+	self->len = 0;
+	memset (self->map, 0, self->alloc * sizeof *self->map);
+}
+
+static void
+str_map_free (struct str_map *self)
+{
+	str_map_clear (self);
 	free (self->map);
 	self->map = NULL;
 }
