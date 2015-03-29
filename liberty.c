@@ -61,6 +61,7 @@
 #endif // ! NI_MAXSERV
 
 #ifdef LIBERTY_WANT_SSL
+#include <openssl/sha.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #endif // LIBERTY_WANT_SSL
@@ -543,6 +544,42 @@ str_remove_slice (struct str *self, size_t start, size_t length)
 	if (self->alloc >= STR_SHRINK_THRESHOLD && self->len < (self->alloc >> 2))
 		self->str = xrealloc (self->str, self->alloc >>= 2);
 }
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+str_pack_u8 (struct str *self, uint8_t x)
+{
+	str_append_data (self, &x, 1);
+}
+
+static void
+str_pack_u16 (struct str *self, uint64_t x)
+{
+	uint8_t tmp[2] = { x >> 8, x };
+	str_append_data (self, tmp, sizeof tmp);
+}
+
+static void
+str_pack_u32 (struct str *self, uint32_t x)
+{
+	uint32_t u = x;
+	uint8_t tmp[4] = { u >> 24, u >> 16, u >> 8, u };
+	str_append_data (self, tmp, sizeof tmp);
+}
+
+static void
+str_pack_u64 (struct str *self, uint64_t x)
+{
+	uint8_t tmp[8] =
+		{ x >> 56, x >> 48, x >> 40, x >> 32, x >> 24, x >> 16, x >> 8, x };
+	str_append_data (self, tmp, sizeof tmp);
+}
+
+#define str_pack_i8(self, x)   str_pack_u8  ((self), (uint8_t)  (x))
+#define str_pack_i16(self, x)  str_pack_u16 ((self), (uint16_t) (x))
+#define str_pack_i32(self, x)  str_pack_u32 ((self), (uint32_t) (x))
+#define str_pack_i64(self, x)  str_pack_u64 ((self), (uint64_t) (x))
 
 // --- Errors ------------------------------------------------------------------
 
@@ -1660,7 +1697,16 @@ msg_unpacker_u8 (struct msg_unpacker *self, uint8_t *value)
 }
 
 static bool
-msg_unpacker_i32 (struct msg_unpacker *self, int32_t *value)
+msg_unpacker_u16 (struct msg_unpacker *self, uint16_t *value)
+{
+	UNPACKER_INT_BEGIN
+	*value
+		= (uint16_t) x[0] << 24 | (uint16_t) x[1] << 16;
+	return true;
+}
+
+static bool
+msg_unpacker_u32 (struct msg_unpacker *self, uint32_t *value)
 {
 	UNPACKER_INT_BEGIN
 	*value
@@ -1681,9 +1727,21 @@ msg_unpacker_u64 (struct msg_unpacker *self, uint64_t *value)
 	return true;
 }
 
+#define msg_unpacker_i8(self, value)                                           \
+	msg_unpacker_u8  ((self), (uint8_t *) (value))
+#define msg_unpacker_i16(self, value)                                          \
+	msg_unpacker_u16 ((self), (uint16_t *) (value))
+#define msg_unpacker_i32(self, value)                                          \
+	msg_unpacker_u32 ((self), (uint32_t *) (value))
+#define msg_unpacker_i64(self, value)                                          \
+	msg_unpacker_u64 ((self), (uint64_t *) (value))
+
 #undef UNPACKER_INT_BEGIN
 
 // --- Message packer and writer -----------------------------------------------
+
+// Use str_pack_*() or other methods to append to the internal buffer, then
+// flush it to get a nice frame.  Handy for iovec.
 
 struct msg_writer
 {
@@ -1698,28 +1756,6 @@ msg_writer_init (struct msg_writer *self)
 	str_append_data (&self->buf, "\x00\x00\x00\x00" "\x00\x00\x00\x00", 8);
 }
 
-static void
-msg_writer_u8 (struct msg_writer *self, uint8_t x)
-{
-	str_append_data (&self->buf, &x, 1);
-}
-
-static void
-msg_writer_i32 (struct msg_writer *self, int32_t x)
-{
-	uint32_t u = x;
-	uint8_t tmp[4] = { u >> 24, u >> 16, u >> 8, u };
-	str_append_data (&self->buf, tmp, sizeof tmp);
-}
-
-static void
-msg_writer_u64 (struct msg_writer *self, uint64_t x)
-{
-	uint8_t tmp[8] =
-		{ x >> 56, x >> 48, x >> 40, x >> 32, x >> 24, x >> 16, x >> 8, x };
-	str_append_data (&self->buf, tmp, sizeof tmp);
-}
-
 static void *
 msg_writer_flush (struct msg_writer *self, size_t *len)
 {
@@ -1731,6 +1767,220 @@ msg_writer_flush (struct msg_writer *self, size_t *len)
 
 	*len = x;
 	return str_steal (&self->buf);
+}
+
+// --- ASCII -------------------------------------------------------------------
+
+static int
+tolower_ascii (int c)
+{
+	return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+}
+
+static size_t
+tolower_ascii_strxfrm (char *dest, const char *src, size_t n)
+{
+	size_t len = strlen (src);
+	while (n-- && (*dest++ = tolower_ascii (*src++)))
+		;
+	return len;
+}
+
+static int
+strcasecmp_ascii (const char *a, const char *b)
+{
+	int x;
+	while (*a || *b)
+		if ((x = tolower_ascii (*(const unsigned char *) a++)
+			- tolower_ascii (*(const unsigned char *) b++)))
+			return x;
+	return 0;
+}
+
+static bool
+isspace_ascii (int c)
+{
+	return c == '\f' || c == '\n' || c == '\r' || c == '\t' || c == '\v';
+}
+
+// --- UTF-8 -------------------------------------------------------------------
+
+/// Return a pointer to the next UTF-8 character, or NULL on error
+// TODO: decode the sequence while we're at it
+static const char *
+utf8_next (const char *s, size_t len)
+{
+	// End of string, we go no further
+	if (!len)
+		return NULL;
+
+	// In the middle of a character -> error
+	const uint8_t *p = (const unsigned char *) s;
+	if ((*p & 0xC0) == 0x80)
+		return NULL;
+
+	// Find out how long the sequence is
+	unsigned mask = 0xC0;
+	unsigned tail_len = 0;
+	while ((*p & mask) == mask)
+	{
+		// Invalid start of sequence
+		if (mask == 0xFE)
+			return NULL;
+
+		mask |= mask >> 1;
+		tail_len++;
+	}
+
+	p++;
+
+	// Check the rest of the sequence
+	if (tail_len > --len)
+		return NULL;
+
+	while (tail_len--)
+		if ((*p++ & 0xC0) != 0x80)
+			return NULL;
+
+	return (const char *) p;
+}
+
+/// Very rough UTF-8 validation, just makes sure codepoints can be iterated
+// TODO: also validate the codepoints
+static bool
+utf8_validate (const char *s, size_t len)
+{
+	const char *next;
+	while (len)
+	{
+		if (!(next = utf8_next (s, len)))
+			return false;
+
+		len -= next - s;
+		s = next;
+	}
+	return true;
+}
+
+// --- Base 64 -----------------------------------------------------------------
+
+static uint8_t g_base64_table[256] =
+{
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 62, 64, 64, 64, 63,
+	52, 53, 54, 55, 56, 57, 58, 59,  60, 61, 64, 64, 64,  0, 64, 64,
+	64,  0,  1,  2,  3,  4,  5,  6,   7,  8,  9, 10, 11, 12, 13, 14,
+	15, 16, 17, 18, 19, 20, 21, 22,  23, 24, 25, 64, 64, 64, 64, 64,
+	64, 26, 27, 28, 29, 30, 31, 32,  33, 34, 35, 36, 37, 38, 39, 40,
+	41, 42, 43, 44, 45, 46, 47, 48,  49, 50, 51, 64, 64, 64, 64, 64,
+
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+	64, 64, 64, 64, 64, 64, 64, 64,  64, 64, 64, 64, 64, 64, 64, 64,
+};
+
+static inline bool
+base64_decode_group (const char **s, bool ignore_ws, struct str *output)
+{
+	uint8_t input[4];
+	size_t loaded = 0;
+	for (; loaded < 4; (*s)++)
+	{
+		if (!**s)
+			return loaded == 0;
+		if (!ignore_ws || !isspace_ascii (**s))
+			input[loaded++] = **s;
+	}
+
+	size_t len = 3;
+	if (input[0] == '=' || input[1] == '=')
+		return false;
+	if (input[2] == '=' && input[3] != '=')
+		return false;
+	if (input[2] == '=')
+		len--;
+	if (input[3] == '=')
+		len--;
+
+	uint8_t a = g_base64_table[input[0]];
+	uint8_t b = g_base64_table[input[1]];
+	uint8_t c = g_base64_table[input[2]];
+	uint8_t d = g_base64_table[input[3]];
+
+	if (((a | b) | (c | d)) & 0x40)
+		return false;
+
+	uint32_t block = a << 18 | b << 12 | c << 6 | d;
+	switch (len)
+	{
+	case 1:
+		str_append_c (output, block >> 16);
+		break;
+	case 2:
+		str_append_c (output, block >> 16);
+		str_append_c (output, block >> 8);
+		break;
+	case 3:
+		str_append_c (output, block >> 16);
+		str_append_c (output, block >> 8);
+		str_append_c (output, block);
+	}
+	return true;
+}
+
+static bool
+base64_decode (const char *s, bool ignore_ws, struct str *output)
+{
+	while (*s)
+		if (!base64_decode_group (&s, ignore_ws, output))
+			return false;
+	return true;
+}
+
+static void
+base64_encode (const void *data, size_t len, struct str *output)
+{
+	const char *alphabet =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+	const uint8_t *p = data;
+	size_t n_groups = len / 3;
+	size_t tail = len - n_groups * 3;
+	uint32_t group;
+
+	for (; n_groups--; p += 3)
+	{
+		group = p[0] << 16 | p[1] << 8 | p[2];
+		str_append_c (output, alphabet[(group >> 18) & 63]);
+		str_append_c (output, alphabet[(group >> 12) & 63]);
+		str_append_c (output, alphabet[(group >>  6) & 63]);
+		str_append_c (output, alphabet[ group        & 63]);
+	}
+
+	switch (tail)
+	{
+	case 2:
+		group = p[0] << 16 | p[1] << 8;
+		str_append_c (output, alphabet[(group >> 18) & 63]);
+		str_append_c (output, alphabet[(group >> 12) & 63]);
+		str_append_c (output, alphabet[(group >>  6) & 63]);
+		str_append_c (output, '=');
+		break;
+	case 1:
+		group = p[0] << 16;
+		str_append_c (output, alphabet[(group >> 18) & 63]);
+		str_append_c (output, alphabet[(group >> 12) & 63]);
+		str_append_c (output, '=');
+		str_append_c (output, '=');
+	default:
+		break;
+	}
 }
 
 // --- Utilities ---------------------------------------------------------------
@@ -2575,3 +2825,7 @@ test_run (struct test *self)
 	str_map_free (&self->blacklist);
 	return 0;
 }
+
+// --- Protocol modules --------------------------------------------------------
+
+#include "liberty-proto.c"

@@ -236,21 +236,6 @@ test_error (void)
 
 // --- Hash map ----------------------------------------------------------------
 
-static int
-tolower_ascii (int c)
-{
-	return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
-}
-
-static size_t
-tolower_strxfrm (char *dest, const char *src, size_t n)
-{
-	size_t len = strlen (src);
-	while (n-- && (*dest++ = tolower_ascii (*src++)))
-		;
-	return len;
-}
-
 static void
 free_counter (void *data)
 {
@@ -280,7 +265,7 @@ test_str_map (void)
 	// Put two reference counted objects in the map under case-insensitive keys
 	struct str_map m;
 	str_map_init (&m);
-	m.key_xfrm = tolower_strxfrm;
+	m.key_xfrm = tolower_ascii_strxfrm;
 	m.free = free_counter;
 
 	int *a = make_counter ();
@@ -323,6 +308,34 @@ test_str_map (void)
 	free_counter (b);
 }
 
+static void
+test_utf8 (void)
+{
+	const char valid  [] = "2H₂ + O₂ ⇌ 2H₂O, R = 4.7 kΩ, ⌀ 200 mm";
+	const char invalid[] = "\xf0\x90\x28\xbc";
+	soft_assert ( utf8_validate (valid,   sizeof valid));
+	soft_assert (!utf8_validate (invalid, sizeof invalid));
+}
+
+static void
+test_base64 (void)
+{
+	char data[65];
+	for (size_t i = 0; i < N_ELEMENTS (data); i++)
+		data[i] = i;
+
+	struct str encoded;  str_init (&encoded);
+	struct str decoded;  str_init (&decoded);
+
+	base64_encode (data, sizeof data, &encoded);
+	soft_assert (base64_decode (encoded.str, false, &decoded));
+	soft_assert (decoded.len == sizeof data);
+	soft_assert (!memcmp (decoded.str, data, sizeof data));
+
+	str_free (&encoded);
+	str_free (&decoded);
+}
+
 // --- Main --------------------------------------------------------------------
 
 int
@@ -338,6 +351,8 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/str",            NULL, test_str);
 	test_add_simple (&test, "/error",          NULL, test_error);
 	test_add_simple (&test, "/str-map",        NULL, test_str_map);
+	test_add_simple (&test, "/utf-8",          NULL, test_utf8);
+	test_add_simple (&test, "/base64",         NULL, test_base64);
 
 	// TODO: write tests for the rest of the library
 

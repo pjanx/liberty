@@ -27,7 +27,7 @@ set (common_sources ${PROJECT_BINARY_DIR}/liberty-config.h)
 
 # Build some unit tests
 enable_testing ()
-foreach (name liberty)
+foreach (name liberty proto)
 	add_executable (test-${name} tests/${name}.c ${common_sources})
 	target_link_libraries (test-${name} ${common_libraries})
 	add_test (test-${name} test-${name})
