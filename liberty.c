@@ -554,7 +554,7 @@ str_pack_u8 (struct str *self, uint8_t x)
 }
 
 static void
-str_pack_u16 (struct str *self, uint64_t x)
+str_pack_u16 (struct str *self, uint16_t x)
 {
 	uint8_t tmp[2] = { x >> 8, x };
 	str_append_data (self, tmp, sizeof tmp);
