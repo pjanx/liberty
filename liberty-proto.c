@@ -1075,7 +1075,7 @@ ws_encode_response_key (const char *key)
 
 enum ws_status
 {
-	// Named according to the meaning specified in RFC 6455, section 11.2
+	// Named according to the meaning specified in RFC 6455, section 11.7
 
 	WS_STATUS_NORMAL_CLOSURE         = 1000,
 	WS_STATUS_GOING_AWAY             = 1001,
