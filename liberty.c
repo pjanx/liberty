@@ -1806,9 +1806,35 @@ strcasecmp_ascii (const char *a, const char *b)
 }
 
 static bool
+isalpha_ascii (int c)
+{
+	c &= ~32;
+	return c >= 'A' && c <= 'Z';
+}
+
+static bool
+isdigit_ascii (int c)
+{
+	return c >= '0' && c <= '9';
+}
+
+static bool
+isalnum_ascii (int c)
+{
+	return isalpha_ascii (c) || isdigit_ascii (c);
+}
+
+static int
+toupper_ascii (int c)
+{
+	return c >= 'A' && c <= 'Z' ? c : c - ('a' - 'A');
+}
+
+static bool
 isspace_ascii (int c)
 {
-	return c == '\f' || c == '\n' || c == '\r' || c == '\t' || c == '\v';
+	return c == ' '  || c == '\f' || c == '\n'
+		|| c == '\r' || c == '\t' || c == '\v';
 }
 
 // --- UTF-8 -------------------------------------------------------------------
