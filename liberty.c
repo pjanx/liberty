@@ -187,6 +187,9 @@ static void
 assertion_failure_handler (bool is_fatal, const char *file, int line,
 	const char *function, const char *condition)
 {
+	const char *slash = strrchr (file, '/');
+	if (slash)
+		file = slash + 1;
 	if (is_fatal)
 	{
 		print_fatal ("assertion failed [%s:%d in function %s]: %s",
