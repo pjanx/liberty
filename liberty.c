@@ -1843,9 +1843,8 @@ isspace_ascii (int c)
 // --- UTF-8 -------------------------------------------------------------------
 
 /// Return a pointer to the next UTF-8 character, or NULL on error
-// TODO: decode the sequence while we're at it
 static const char *
-utf8_next (const char *s, size_t len)
+utf8_next (const char *s, size_t len, int32_t *codepoint)
 {
 	// End of string, we go no further
 	if (!len)
@@ -1869,34 +1868,74 @@ utf8_next (const char *s, size_t len)
 		tail_len++;
 	}
 
-	p++;
-
 	// Check the rest of the sequence
 	if (tail_len > --len)
 		return NULL;
 
+	uint32_t cp = *p++ & ~mask;
 	while (tail_len--)
-		if ((*p++ & 0xC0) != 0x80)
+	{
+		if ((*p & 0xC0) != 0x80)
 			return NULL;
-
+		cp = cp << 6 | (*p++ & 0x3F);
+	}
+	if (codepoint)
+		*codepoint = cp;
 	return (const char *) p;
 }
 
 /// Very rough UTF-8 validation, just makes sure codepoints can be iterated
-// TODO: also validate the codepoints
 static bool
 utf8_validate (const char *s, size_t len)
 {
 	const char *next;
 	while (len)
 	{
-		if (!(next = utf8_next (s, len)))
+		int32_t codepoint;
+		// TODO: better validations
+		if (!(next = utf8_next (s, len, &codepoint))
+		 || codepoint > 0x10FFFF)
 			return false;
 
 		len -= next - s;
 		s = next;
 	}
 	return true;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct utf8_iter
+{
+	const char *s;                      ///< String iterator
+	size_t len;                         ///< How many bytes remain
+};
+
+static void
+utf8_iter_init (struct utf8_iter *self, const char *s)
+{
+	self->len = strlen ((self->s = s));
+}
+
+static int32_t
+utf8_iter_next (struct utf8_iter *self, size_t *len)
+{
+	if (!self->len)
+		return -1;
+
+	const char *old = self->s;
+	int32_t codepoint;
+	if (!soft_assert ((self->s = utf8_next (old, self->len, &codepoint))))
+	{
+		// Invalid UTF-8
+		self->len = 0;
+		return -1;
+	}
+
+	size_t advance = self->s - old;
+	self->len -= advance;
+	if (len) *len = advance;
+	return codepoint;
 }
 
 // --- Base 64 -----------------------------------------------------------------
