@@ -32,6 +32,35 @@ struct irc_message
 	struct str_vector params;           ///< Command parameters
 };
 
+static char *
+irc_unescape_message_tag (const char *value)
+{
+	struct str s;
+	str_init (&s);
+
+	bool escape = false;
+	for (const char *p = value; *p; p++)
+	{
+		if (escape)
+		{
+			switch (*p)
+			{
+			case ':': str_append_c (&s, ';');  break;
+			case 's': str_append_c (&s, ' ');  break;
+			case 'r': str_append_c (&s, '\r'); break;
+			case 'n': str_append_c (&s, '\n'); break;
+			default:  str_append_c (&s, *p);
+			}
+			escape = false;
+		}
+		else if (*p == '\\')
+			escape = true;
+		else
+			str_append_c (&s, *p);
+	}
+	return str_steal (&s);
+}
+
 static void
 irc_parse_message_tags (const char *tags, struct str_map *out)
 {
@@ -45,7 +74,7 @@ irc_parse_message_tags (const char *tags, struct str_map *out)
 		if (equal_sign)
 		{
 			*equal_sign = '\0';
-			str_map_set (out, key, xstrdup (equal_sign + 1));
+			str_map_set (out, key, irc_unescape_message_tag (equal_sign + 1));
 		}
 		else
 			str_map_set (out, key, xstrdup (""));
