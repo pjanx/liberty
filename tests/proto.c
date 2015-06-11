@@ -34,6 +34,46 @@
 // --- Tests -------------------------------------------------------------------
 
 static void
+test_irc (void)
+{
+	struct irc_message msg;
+	irc_parse_message (&msg, "@first=a\\:\\s\\r\\n\\\\;2nd "
+		":srv hi there :good m8 :how are you?");
+
+	struct str_map_iter iter;
+	str_map_iter_init (&iter, &msg.tags);
+	soft_assert (msg.tags.len == 2);
+
+	char *value;
+	while ((value = str_map_iter_next (&iter)))
+	{
+		if (!strcmp (iter.link->key, "first"))
+			soft_assert (!strcmp (value, "a; \r\n\\"));
+		else if (!strcmp (iter.link->key, "2nd"))
+			soft_assert (!strcmp (value, ""));
+		else
+			soft_assert (!"found unexpected message tag");
+	}
+
+	soft_assert (!strcmp (msg.prefix, "srv"));
+	soft_assert (!strcmp (msg.command, "hi"));
+	soft_assert (msg.params.len == 2);
+	soft_assert (!strcmp (msg.params.vector[0], "there"));
+	soft_assert (!strcmp (msg.params.vector[1], "good m8 :how are you?"));
+
+	irc_free_message (&msg);
+
+	const char *n[2] = { "[fag]^", "{FAG}~" };
+	soft_assert (!irc_strcmp (n[0], n[1]));
+
+	char a[irc_strxfrm (NULL, n[0], 0)]; irc_strxfrm (a, n[0], sizeof a);
+	char b[irc_strxfrm (NULL, n[1], 0)]; irc_strxfrm (b, n[1], sizeof b);
+	soft_assert (!strcmp (a, b));
+
+	// TODO: more tests
+}
+
+static void
 test_http_parser (void)
 {
 	struct str_map parameters;
@@ -157,11 +197,11 @@ main (int argc, char *argv[])
 	struct test test;
 	test_init (&test, argc, argv);
 
+	test_add_simple (&test, "/irc",            NULL, test_irc);
 	test_add_simple (&test, "/http-parser",    NULL, test_http_parser);
 	test_add_simple (&test, "/scgi-parser",    NULL, test_scgi_parser);
 	test_add_simple (&test, "/websockets",     NULL, test_websockets);
 	// TODO: test FastCGI
-	// TODO: test IRC
 
 	return test_run (&test);
 }
