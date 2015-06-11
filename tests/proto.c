@@ -66,8 +66,8 @@ test_irc (void)
 	const char *n[2] = { "[fag]^", "{FAG}~" };
 	soft_assert (!irc_strcmp (n[0], n[1]));
 
-	char a[irc_strxfrm (NULL, n[0], 0)]; irc_strxfrm (a, n[0], sizeof a);
-	char b[irc_strxfrm (NULL, n[1], 0)]; irc_strxfrm (b, n[1], sizeof b);
+	char a[irc_strxfrm (NULL, n[0], 0) + 1]; irc_strxfrm (a, n[0], sizeof a);
+	char b[irc_strxfrm (NULL, n[1], 0) + 1]; irc_strxfrm (b, n[1], sizeof b);
 	soft_assert (!strcmp (a, b));
 
 	// TODO: more tests
