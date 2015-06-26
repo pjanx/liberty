@@ -401,13 +401,20 @@ str_vector_add_vector (struct str_vector *self, char **vector)
 		str_vector_add (self, *vector++);
 }
 
+static char *
+str_vector_steal (struct str_vector *self, size_t i)
+{
+	hard_assert (i < self->len);
+	char *tmp = self->vector[i];
+	memmove (self->vector + i, self->vector + i + 1,
+		(self->len-- - i) * sizeof *self->vector);
+	return tmp;
+}
+
 static void
 str_vector_remove (struct str_vector *self, size_t i)
 {
-	hard_assert (i < self->len);
-	free (self->vector[i]);
-	memmove (self->vector + i, self->vector + i + 1,
-		(self->len-- - i) * sizeof *self->vector);
+	free (str_vector_steal (self, i));
 }
 
 // --- Dynamically allocated strings -------------------------------------------
