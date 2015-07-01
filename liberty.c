@@ -46,6 +46,7 @@
 #include <syslog.h>
 #include <fnmatch.h>
 #include <iconv.h>
+#include <pwd.h>
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -2194,11 +2195,52 @@ get_xdg_config_dirs (struct str_vector *out)
 }
 
 static char *
+try_expand_tilde (const char *filename)
+{
+	size_t until_slash = strcspn (filename, "/");
+	if (!until_slash)
+	{
+		struct str expanded;
+		str_init (&expanded);
+		str_append_env_path (&expanded, "HOME", false);
+		str_append (&expanded, filename);
+		return str_steal (&expanded);
+	}
+
+	int buf_len = sysconf (_SC_GETPW_R_SIZE_MAX);
+	if (buf_len < 0)
+		buf_len = 1024;
+	struct passwd pwd, *success = NULL;
+
+	char *user = xstrndup (filename, until_slash);
+	char *buf = xmalloc (buf_len);
+	while (getpwnam_r (user, &pwd, buf, buf_len, &success) == ERANGE)
+		buf = xrealloc (buf, buf_len <<= 1);
+	free (user);
+
+	char *result = NULL;
+	if (success)
+		result = xstrdup_printf ("%s%s", pwd.pw_dir, filename + until_slash);
+	free (buf);
+	return result;
+}
+
+static char *
 resolve_config_filename (const char *filename)
 {
 	// Absolute path is absolute
 	if (*filename == '/')
 		return xstrdup (filename);
+
+	// We don't want to use wordexp() for this as it may execute /bin/sh
+	if (*filename == '~')
+	{
+		// Paths to home directories ought to be absolute
+		char *expanded = try_expand_tilde (filename + 1);
+		if (expanded)
+			return expanded;
+		print_debug ("failed to expand the home directory in `%s'", filename);
+	}
 
 	struct str_vector paths;
 	str_vector_init (&paths);
