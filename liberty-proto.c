@@ -66,7 +66,7 @@ irc_parse_message_tags (const char *tags, struct str_map *out)
 {
 	struct str_vector v;
 	str_vector_init (&v);
-	split_str_ignore_empty (tags, ';', &v);
+	cstr_split_ignore_empty (tags, ';', &v);
 
 	for (size_t i = 0; i < v.len; i++)
 	{
@@ -191,14 +191,17 @@ irc_tolower (int c)
 	return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
 }
 
-static size_t
-irc_strxfrm (char *dest, const char *src, size_t n)
+static int
+irc_tolower_strict (int c)
 {
-	size_t len = strlen (src);
-	while (n-- && (*dest++ = irc_tolower (*src++)))
-		;
-	return len;
+	if (c == '[')   return '{';
+	if (c == ']')   return '}';
+	if (c == '\\')  return '|';
+	return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
 }
+
+TRIVIAL_STRXFRM (irc_strxfrm,        irc_tolower)
+TRIVIAL_STRXFRM (irc_strxfrm_strict, irc_tolower_strict)
 
 static int
 irc_strcmp (const char *a, const char *b)

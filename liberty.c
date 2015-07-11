@@ -314,6 +314,15 @@ xstrndup (const char *s, size_t n)
 		(tail) = (link);                                                       \
 	BLOCK_END
 
+#define LIST_INSERT_WITH_TAIL(head, tail, link, following)                     \
+	BLOCK_START                                                                \
+		if (following)                                                         \
+			LIST_APPEND_WITH_TAIL ((head), (following)->prev, (link));         \
+		else                                                                   \
+			LIST_APPEND_WITH_TAIL ((head), (tail), (link));                    \
+		(link)->next = (following);                                            \
+	BLOCK_END
+
 #define LIST_UNLINK_WITH_TAIL(head, tail, link)                                \
 	BLOCK_START                                                                \
 		if ((tail) == (link))                                                  \
@@ -1468,6 +1477,12 @@ poller_timer_set (struct poller_timer *self, int timeout_ms)
 	poller_timers_set (self->timers, self);
 }
 
+static bool
+poller_timer_is_active (struct poller_timer *self)
+{
+	return self->index != -1;
+}
+
 static void
 poller_timer_reset (struct poller_timer *self)
 {
@@ -1790,26 +1805,47 @@ msg_writer_flush (struct msg_writer *self, size_t *len)
 
 // --- ASCII -------------------------------------------------------------------
 
+#define TRIVIAL_STRXFRM(name, fn)                                              \
+	static size_t                                                              \
+	name (char *dest, const char *src, size_t n)                               \
+	{                                                                          \
+		size_t len = strlen (src);                                             \
+		while (n-- && (*dest++ = (fn) (*src++)))                               \
+			;                                                                  \
+		return len;                                                            \
+	}
+
 static int
 tolower_ascii (int c)
 {
 	return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
 }
 
-static size_t
-tolower_ascii_strxfrm (char *dest, const char *src, size_t n)
+static int
+toupper_ascii (int c)
 {
-	size_t len = strlen (src);
-	while (n-- && (*dest++ = tolower_ascii (*src++)))
-		;
-	return len;
+	return c >= 'A' && c <= 'Z' ? c : c - ('a' - 'A');
 }
+
+TRIVIAL_STRXFRM (tolower_ascii_strxfrm, tolower_ascii)
+TRIVIAL_STRXFRM (toupper_ascii_strxfrm, toupper_ascii)
 
 static int
 strcasecmp_ascii (const char *a, const char *b)
 {
 	int x;
 	while (*a || *b)
+		if ((x = tolower_ascii (*(const unsigned char *) a++)
+			- tolower_ascii (*(const unsigned char *) b++)))
+			return x;
+	return 0;
+}
+
+static int
+strncasecmp_ascii (const char *a, const char *b, size_t n)
+{
+	int x;
+	while (n-- && (*a || *b))
 		if ((x = tolower_ascii (*(const unsigned char *) a++)
 			- tolower_ascii (*(const unsigned char *) b++)))
 			return x;
@@ -1833,12 +1869,6 @@ static bool
 isalnum_ascii (int c)
 {
 	return isalpha_ascii (c) || isdigit_ascii (c);
-}
-
-static int
-toupper_ascii (int c)
-{
-	return c >= 'A' && c <= 'Z' ? c : c - ('a' - 'A');
 }
 
 static bool
@@ -2070,7 +2100,7 @@ base64_encode (const void *data, size_t len, struct str *output)
 // --- Utilities ---------------------------------------------------------------
 
 static void
-split_str_ignore_empty (const char *s, char delimiter, struct str_vector *out)
+cstr_split_ignore_empty (const char *s, char delimiter, struct str_vector *out)
 {
 	const char *begin = s, *end;
 
@@ -2086,7 +2116,7 @@ split_str_ignore_empty (const char *s, char delimiter, struct str_vector *out)
 }
 
 static char *
-strip_str_in_place (char *s, const char *stripped_chars)
+cstr_strip_in_place (char *s, const char *stripped_chars)
 {
 	char *end = s + strlen (s);
 	while (end > s && strchr (stripped_chars, end[-1]))
@@ -2097,6 +2127,21 @@ strip_str_in_place (char *s, const char *stripped_chars)
 		memmove (s, start, end - start + 1);
 	return s;
 }
+
+static void
+cstr_transform (char *s, int (*tolower) (int c))
+{
+	for (; *s; s++)
+		*s = tolower (*s);
+}
+
+static char *
+cstr_cut_until (const char *s, const char *alphabet)
+{
+	return xstrndup (s, strcspn (s, alphabet));
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static char *
 join_str_vector (const struct str_vector *v, char delimiter)
@@ -2157,121 +2202,62 @@ iconv_xstrdup (iconv_t conv, char *in, size_t in_len, size_t *out_len)
 }
 
 static bool
-str_append_env_path (struct str *output, const char *var, bool only_absolute)
+set_boolean_if_valid (bool *out, const char *s)
 {
-	const char *value = getenv (var);
+	if      (!strcasecmp (s, "yes"))    *out = true;
+	else if (!strcasecmp (s, "no"))     *out = false;
+	else if (!strcasecmp (s, "on"))     *out = true;
+	else if (!strcasecmp (s, "off"))    *out = false;
+	else if (!strcasecmp (s, "true"))   *out = true;
+	else if (!strcasecmp (s, "false"))  *out = false;
+	else return false;
 
-	if (!value || (only_absolute && *value != '/'))
-		return false;
-
-	str_append (output, value);
 	return true;
 }
 
-static void
-get_xdg_home_dir (struct str *output, const char *var, const char *def)
+static bool
+xstrtoul (unsigned long *out, const char *s, int base)
 {
-	str_reset (output);
-	if (!str_append_env_path (output, var, true))
-	{
-		str_append_env_path (output, "HOME", false);
-		str_append_c (output, '/');
-		str_append (output, def);
-	}
+	char *end;
+	errno = 0;
+	*out = strtoul (s, &end, base);
+	return errno == 0 && !*end && end != s;
 }
 
-static void
-get_xdg_config_dirs (struct str_vector *out)
+static bool
+read_line (FILE *fp, struct str *s)
 {
-	struct str config_home;
-	str_init (&config_home);
-	get_xdg_home_dir (&config_home, "XDG_CONFIG_HOME", ".config");
-	str_vector_add (out, config_home.str);
-	str_free (&config_home);
+	int c;
+	bool at_end = true;
 
-	const char *xdg_config_dirs;
-	if ((xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
-		split_str_ignore_empty (xdg_config_dirs, ':', out);
-}
-
-static char *
-try_expand_tilde (const char *filename)
-{
-	size_t until_slash = strcspn (filename, "/");
-	if (!until_slash)
+	str_reset (s);
+	while ((c = fgetc (fp)) != EOF)
 	{
-		struct str expanded;
-		str_init (&expanded);
-		str_append_env_path (&expanded, "HOME", false);
-		str_append (&expanded, filename);
-		return str_steal (&expanded);
-	}
-
-	int buf_len = sysconf (_SC_GETPW_R_SIZE_MAX);
-	if (buf_len < 0)
-		buf_len = 1024;
-	struct passwd pwd, *success = NULL;
-
-	char *user = xstrndup (filename, until_slash);
-	char *buf = xmalloc (buf_len);
-	while (getpwnam_r (user, &pwd, buf, buf_len, &success) == ERANGE)
-		buf = xrealloc (buf, buf_len <<= 1);
-	free (user);
-
-	char *result = NULL;
-	if (success)
-		result = xstrdup_printf ("%s%s", pwd.pw_dir, filename + until_slash);
-	free (buf);
-	return result;
-}
-
-static char *
-resolve_config_filename (const char *filename)
-{
-	// Absolute path is absolute
-	if (*filename == '/')
-		return xstrdup (filename);
-
-	// We don't want to use wordexp() for this as it may execute /bin/sh
-	if (*filename == '~')
-	{
-		// Paths to home directories ought to be absolute
-		char *expanded = try_expand_tilde (filename + 1);
-		if (expanded)
-			return expanded;
-		print_debug ("failed to expand the home directory in `%s'", filename);
-	}
-
-	struct str_vector paths;
-	str_vector_init (&paths);
-	get_xdg_config_dirs (&paths);
-
-	struct str file;
-	str_init (&file);
-
-	char *result = NULL;
-	for (unsigned i = 0; i < paths.len; i++)
-	{
-		// As per spec, relative paths are ignored
-		if (*paths.vector[i] != '/')
+		at_end = false;
+		if (c == '\r')
 			continue;
-
-		str_reset (&file);
-		str_append_printf (&file, "%s/" PROGRAM_NAME "/%s",
-			paths.vector[i], filename);
-
-		struct stat st;
-		if (!stat (file.str, &st))
-		{
-			result = str_steal (&file);
+		if (c == '\n')
 			break;
-		}
+		str_append_c (s, c);
 	}
 
-	str_vector_free (&paths);
-	str_free (&file);
-	return result;
+	return !at_end;
 }
+
+static char *
+format_host_port_pair (const char *host, const char *port)
+{
+	// For when binding to the NULL address; would an asterisk be better?
+	if (!host)
+		host = "";
+
+	// IPv6 addresses mess with the "colon notation"; let's go with RFC 2732
+	if (strchr (host, ':'))
+		return xstrdup_printf ("[%s]:%s", host, port);
+	return xstrdup_printf ("%s:%s", host, port);
+}
+
+// --- File system -------------------------------------------------------------
 
 static bool
 ensure_directory_existence (const char *path, struct error **e)
@@ -2319,55 +2305,150 @@ mkdir_with_parents (char *path, struct error **e)
 }
 
 static bool
-set_boolean_if_valid (bool *out, const char *s)
+str_append_env_path (struct str *output, const char *var, bool only_absolute)
 {
-	if      (!strcasecmp (s, "yes"))    *out = true;
-	else if (!strcasecmp (s, "no"))     *out = false;
-	else if (!strcasecmp (s, "on"))     *out = true;
-	else if (!strcasecmp (s, "off"))    *out = false;
-	else if (!strcasecmp (s, "true"))   *out = true;
-	else if (!strcasecmp (s, "false"))  *out = false;
-	else return false;
+	const char *value = getenv (var);
 
+	if (!value || (only_absolute && *value != '/'))
+		return false;
+
+	str_append (output, value);
 	return true;
 }
 
-static bool
-xstrtoul (unsigned long *out, const char *s, int base)
+static void
+get_xdg_home_dir (struct str *output, const char *var, const char *def)
 {
-	char *end;
-	errno = 0;
-	*out = strtoul (s, &end, base);
-	return errno == 0 && !*end && end != s;
+	str_reset (output);
+	if (!str_append_env_path (output, var, true))
+	{
+		str_append_env_path (output, "HOME", false);
+		str_append_c (output, '/');
+		str_append (output, def);
+	}
 }
 
-static bool
-read_line (FILE *fp, struct str *s)
+static void
+get_xdg_config_dirs (struct str_vector *out)
 {
-	int c;
-	bool at_end = true;
+	struct str config_home;
+	str_init (&config_home);
+	get_xdg_home_dir (&config_home, "XDG_CONFIG_HOME", ".config");
+	str_vector_add (out, config_home.str);
+	str_free (&config_home);
 
-	str_reset (s);
-	while ((c = fgetc (fp)) != EOF)
-	{
-		at_end = false;
-		if (c == '\r')
-			continue;
-		if (c == '\n')
-			break;
-		str_append_c (s, c);
-	}
-
-	return !at_end;
+	const char *xdg_config_dirs;
+	if ((xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
+		cstr_split_ignore_empty (xdg_config_dirs, ':', out);
 }
 
 static char *
-format_host_port_pair (const char *host, const char *port)
+try_expand_tilde (const char *filename)
 {
-	// IPv6 addresses mess with the "colon notation"; let's go with RFC 2732
-	if (strchr (host, ':'))
-		return xstrdup_printf ("[%s]:%s", host, port);
-	return xstrdup_printf ("%s:%s", host, port);
+	size_t until_slash = strcspn (filename, "/");
+	if (!until_slash)
+	{
+		struct str expanded;
+		str_init (&expanded);
+		str_append_env_path (&expanded, "HOME", false);
+		str_append (&expanded, filename);
+		return str_steal (&expanded);
+	}
+
+	int buf_len = sysconf (_SC_GETPW_R_SIZE_MAX);
+	if (buf_len < 0)
+		buf_len = 1024;
+	struct passwd pwd, *success = NULL;
+
+	char *user = xstrndup (filename, until_slash);
+	char *buf = xmalloc (buf_len);
+	while (getpwnam_r (user, &pwd, buf, buf_len, &success) == ERANGE)
+		buf = xrealloc (buf, buf_len <<= 1);
+	free (user);
+
+	char *result = NULL;
+	if (success)
+		result = xstrdup_printf ("%s%s", pwd.pw_dir, filename + until_slash);
+	free (buf);
+	return result;
+}
+
+static char *
+resolve_relative_config_filename (const char *filename)
+{
+	struct str_vector paths;
+	str_vector_init (&paths);
+	get_xdg_config_dirs (&paths);
+
+	struct str file;
+	str_init (&file);
+
+	char *result = NULL;
+	for (unsigned i = 0; i < paths.len; i++)
+	{
+		// As per spec, relative paths are ignored
+		if (*paths.vector[i] != '/')
+			continue;
+
+		str_reset (&file);
+		str_append_printf (&file, "%s/" PROGRAM_NAME "/%s",
+			paths.vector[i], filename);
+
+		struct stat st;
+		if (!stat (file.str, &st))
+		{
+			result = str_steal (&file);
+			break;
+		}
+	}
+
+	str_vector_free (&paths);
+	str_free (&file);
+	return result;
+}
+
+static char *
+resolve_relative_runtime_filename (const char *filename)
+{
+	struct str path;
+	str_init (&path);
+
+	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
+	if (runtime_dir && *runtime_dir == '/')
+		str_append (&path, runtime_dir);
+	else
+		get_xdg_home_dir (&path, "XDG_DATA_HOME", ".local/share");
+	str_append_printf (&path, "/%s/%s", PROGRAM_NAME, filename);
+
+	// Try to create the file's ancestors;
+	// typically the user will want to immediately create a file in there
+	const char *last_slash = strrchr (path.str, '/');
+	if (last_slash && last_slash != path.str)
+	{
+		char *copy = xstrndup (path.str, last_slash - path.str);
+		(void) mkdir_with_parents (copy, NULL);
+		free (copy);
+	}
+	return str_steal (&path);
+}
+
+static char *
+resolve_filename (const char *filename, char *(*relative_cb) (const char *))
+{
+	// Absolute path is absolute
+	if (*filename == '/')
+		return xstrdup (filename);
+
+	// We don't want to use wordexp() for this as it may execute /bin/sh
+	if (*filename == '~')
+	{
+		// Paths to home directories ought to be absolute
+		char *expanded = try_expand_tilde (filename + 1);
+		if (expanded)
+			return expanded;
+		print_debug ("failed to expand the home directory in `%s'", filename);
+	}
+	return relative_cb (filename);
 }
 
 // --- OpenSSL -----------------------------------------------------------------
@@ -2488,7 +2569,8 @@ load_config_defaults (struct str_map *config, const struct config_item *table)
 static bool
 read_config_file (struct str_map *config, struct error **e)
 {
-	char *filename = resolve_config_filename (PROGRAM_NAME ".conf");
+	char *filename = resolve_filename
+		(PROGRAM_NAME ".conf", resolve_relative_config_filename);
 	if (!filename)
 		return true;
 
