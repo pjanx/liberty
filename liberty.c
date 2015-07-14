@@ -2575,7 +2575,7 @@ xssl_get_error (SSL *ssl, int result, const char **error_info)
 		return error;
 	case SSL_ERROR_SYSCALL:
 		if ((error = ERR_get_error ()))
-			*error_info = ERR_error_string (error, NULL);
+			*error_info = ERR_reason_error_string (error);
 		else if (result == 0)
 			// An EOF that's not according to the protocol is still an EOF
 			return SSL_ERROR_ZERO_RETURN;
@@ -2588,9 +2588,9 @@ xssl_get_error (SSL *ssl, int result, const char **error_info)
 		return SSL_ERROR_SSL;
 	default:
 		if ((error = ERR_get_error ()))
-			*error_info = ERR_error_string (error, NULL);
+			*error_info = ERR_reason_error_string (error);
 		else
-			*error_info = "Unknown error";
+			*error_info = "unknown error";
 		return SSL_ERROR_SSL;
 	}
 }
