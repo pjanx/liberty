@@ -659,6 +659,80 @@ error_propagate (struct error **destination, struct error *source)
 	*destination = source;
 }
 
+// --- File descriptor utilities -----------------------------------------------
+
+static void
+set_cloexec (int fd)
+{
+	soft_assert (fcntl (fd, F_SETFD, fcntl (fd, F_GETFD) | FD_CLOEXEC) != -1);
+}
+
+static bool
+set_blocking (int fd, bool blocking)
+{
+	int flags = fcntl (fd, F_GETFL);
+	hard_assert (flags != -1);
+
+	bool prev = !(flags & O_NONBLOCK);
+	if (blocking)
+		flags &= ~O_NONBLOCK;
+	else
+		flags |=  O_NONBLOCK;
+
+	hard_assert (fcntl (fd, F_SETFL, flags) != -1);
+	return prev;
+}
+
+static void
+xclose (int fd)
+{
+	while (close (fd) == -1)
+		if (!soft_assert (errno == EINTR))
+			break;
+}
+
+// --- Randomness --------------------------------------------------------------
+
+static bool
+random_bytes (void *output, size_t len, struct error **e)
+{
+	bool result = false;
+	int fd = open ("/dev/urandom", O_RDONLY);
+	ssize_t got = 0;
+
+	if (fd < 0)
+	{
+		error_set (e, "%s: %s", "open", strerror (errno));
+		return false;
+	}
+	else if ((got = read (fd, output, len)) < 0)
+		error_set (e, "%s: %s", "read", strerror (errno));
+	else if (got != (ssize_t) len)
+		error_set (e, "can't get enough bytes from the device");
+	else
+		result = true;
+
+	xclose (fd);
+	return result;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static unsigned char g_siphash_key[16] = "SipHash 2-4 key!";
+
+static inline void
+siphash_wrapper_randomize (void)
+{
+	// I guess there's no real need to be this paranoic, so we ignore failures
+	soft_assert (random_bytes (g_siphash_key, sizeof g_siphash_key, NULL));
+}
+
+static inline uint64_t
+siphash_wrapper (const void *m, size_t len)
+{
+	return siphash (g_siphash_key, m, len);
+}
+
 // --- String hash map ---------------------------------------------------------
 
 // The most basic <string, managed pointer> map (or associative array).
@@ -729,23 +803,16 @@ str_map_free (struct str_map *self)
 }
 
 static uint64_t
-str_map_hash (const char *s, size_t len)
-{
-	static unsigned char key[16] = "SipHash 2-4 key!";
-	return siphash (key, (const void *) s, len);
-}
-
-static uint64_t
 str_map_pos (struct str_map *self, const char *s)
 {
 	size_t mask = self->alloc - 1;
-	return str_map_hash (s, strlen (s)) & mask;
+	return siphash_wrapper (s, strlen (s)) & mask;
 }
 
 static uint64_t
 str_map_link_hash (struct str_map_link *self)
 {
-	return str_map_hash (self->key, self->key_length);
+	return siphash_wrapper (self->key, self->key_length);
 }
 
 static void
@@ -957,38 +1024,6 @@ str_map_unset_iter_free (struct str_map_unset_iter *self)
 {
 	self->iter.map->shrink_lock = false;
 	str_map_shrink (self->iter.map);
-}
-
-// --- File descriptor utilities -----------------------------------------------
-
-static void
-set_cloexec (int fd)
-{
-	soft_assert (fcntl (fd, F_SETFD, fcntl (fd, F_GETFD) | FD_CLOEXEC) != -1);
-}
-
-static bool
-set_blocking (int fd, bool blocking)
-{
-	int flags = fcntl (fd, F_GETFL);
-	hard_assert (flags != -1);
-
-	bool prev = !(flags & O_NONBLOCK);
-	if (blocking)
-		flags &= ~O_NONBLOCK;
-	else
-		flags |=  O_NONBLOCK;
-
-	hard_assert (fcntl (fd, F_SETFL, flags) != -1);
-	return prev;
-}
-
-static void
-xclose (int fd)
-{
-	while (close (fd) == -1)
-		if (!soft_assert (errno == EINTR))
-			break;
 }
 
 // --- Event loop --------------------------------------------------------------
