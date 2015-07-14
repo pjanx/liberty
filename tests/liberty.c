@@ -306,6 +306,30 @@ test_str_map (void)
 	soft_assert (*b == 1);
 	free_counter (a);
 	free_counter (b);
+
+	// Iterator test with a high number of items
+	str_map_init (&m);
+	m.free = free;
+
+	for (size_t i = 0; i < 100 * 100; i++)
+	{
+		char *x = xstrdup_printf ("%zu", i);
+		str_map_set (&m, x, x);
+	}
+
+	struct str_map_unset_iter unset_iter;
+	str_map_unset_iter_init (&unset_iter, &m);
+	while ((str_map_unset_iter_next (&unset_iter)))
+	{
+		unsigned long x;
+		hard_assert (xstrtoul (&x, unset_iter.link->key, 10));
+		if (x >= 100)
+			str_map_set (&m, unset_iter.link->key, NULL);
+	}
+	str_map_unset_iter_free (&unset_iter);
+
+	soft_assert (m.len == 100);
+	str_map_free (&m);
 }
 
 static void

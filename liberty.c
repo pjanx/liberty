@@ -682,16 +682,8 @@ struct str_map
 	/// Callback that transforms all key values for storage and comparison;
 	/// has to behave exactly like strxfrm().
 	size_t (*key_xfrm) (char *dest, const char *src, size_t n);
-};
 
-// As long as you don't remove the current entry, you can modify the map.
-// Use `link' directly to access the data.
-
-struct str_map_iter
-{
-	struct str_map *map;                ///< The map we're iterating
-	size_t next_index;                  ///< Next table index to search
-	struct str_map_link *link;          ///< Current link
+	bool shrink_lock;                   ///< Lock against autoshrinking
 };
 
 #define STR_MAP_MIN_ALLOC 16
@@ -706,6 +698,7 @@ str_map_init (struct str_map *self)
 	self->free = NULL;
 	self->key_xfrm = NULL;
 	self->map = xcalloc (self->alloc, sizeof *self->map);
+	self->shrink_lock = false;
 }
 
 static void
@@ -733,29 +726,6 @@ str_map_free (struct str_map *self)
 	str_map_clear (self);
 	free (self->map);
 	self->map = NULL;
-}
-
-static void
-str_map_iter_init (struct str_map_iter *self, struct str_map *map)
-{
-	self->map = map;
-	self->next_index = 0;
-	self->link = NULL;
-}
-
-static void *
-str_map_iter_next (struct str_map_iter *self)
-{
-	struct str_map *map = self->map;
-	if (self->link)
-		self->link = self->link->next;
-	while (!self->link)
-	{
-		if (self->next_index >= map->alloc)
-			return NULL;
-		self->link = map->map[self->next_index++];
-	}
-	return self->link->data;
 }
 
 static uint64_t
@@ -806,6 +776,21 @@ str_map_resize (struct str_map *self, size_t new_size)
 }
 
 static void
+str_map_shrink (struct str_map *self)
+{
+	if (self->shrink_lock)
+		return;
+
+	// The array should be at least 1/4 full
+	size_t new_alloc = self->alloc;
+	while (self->len < (new_alloc >> 2)
+		&& new_alloc >= (STR_MAP_MIN_ALLOC << 1))
+		new_alloc >>= 1;
+	if (new_alloc != self->alloc)
+		str_map_resize (self, new_alloc);
+}
+
+static void
 str_map_set_real (struct str_map *self, const char *key, void *value)
 {
 	uint64_t pos = str_map_pos (self, key);
@@ -829,10 +814,7 @@ str_map_set_real (struct str_map *self, const char *key, void *value)
 		free (iter);
 		self->len--;
 
-		// The array should be at least 1/4 full
-		if (self->alloc >= (STR_MAP_MIN_ALLOC << 2)
-		 && self->len < (self->alloc >> 2))
-			str_map_resize (self, self->alloc >> 2);
+		str_map_shrink (self);
 		return;
 	}
 
@@ -888,6 +870,79 @@ str_map_find (struct str_map *self, const char *key)
 	char tmp[self->key_xfrm (NULL, key, 0) + 1];
 	self->key_xfrm (tmp, key, sizeof tmp);
 	return str_map_find_real (self, tmp);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// This iterator is intended for accessing and eventually adding links.
+// Use `link' directly to access the data.
+
+struct str_map_iter
+{
+	struct str_map *map;                ///< The map we're iterating
+	size_t next_index;                  ///< Next table index to search
+	struct str_map_link *link;          ///< Current link
+};
+
+static void
+str_map_iter_init (struct str_map_iter *self, struct str_map *map)
+{
+	self->map = map;
+	self->next_index = 0;
+	self->link = NULL;
+}
+
+static void *
+str_map_iter_next (struct str_map_iter *self)
+{
+	struct str_map *map = self->map;
+	if (self->link)
+		self->link = self->link->next;
+	while (!self->link)
+	{
+		if (self->next_index >= map->alloc)
+			return NULL;
+		self->link = map->map[self->next_index++];
+	}
+	return self->link->data;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// This iterator is intended for accessing and eventually removing links.
+// Use `link' directly to access the data.
+
+struct str_map_unset_iter
+{
+	struct str_map_iter iter;           ///< Regular iterator
+	struct str_map_link *link;          ///< Current link
+	struct str_map_link *next;          ///< Next link
+};
+
+static void
+str_map_unset_iter_init (struct str_map_unset_iter *self, struct str_map *map)
+{
+	str_map_iter_init (&self->iter, map);
+	self->iter.map->shrink_lock = true;
+	(void) str_map_iter_next (&self->iter);
+	self->next = self->iter.link;
+}
+
+static void *
+str_map_unset_iter_next (struct str_map_unset_iter *self)
+{
+	if (!(self->link = self->next))
+		return NULL;
+	(void) str_map_iter_next (&self->iter);
+	self->next = self->iter.link;
+	return self->link->data;
+}
+
+static void
+str_map_unset_iter_free (struct str_map_unset_iter *self)
+{
+	self->iter.map->shrink_lock = false;
+	str_map_shrink (self->iter.map);
 }
 
 // --- File descriptor utilities -----------------------------------------------
