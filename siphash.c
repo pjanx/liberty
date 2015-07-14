@@ -7,8 +7,6 @@
 // You should have received a copy of the CC0 Public Domain Dedication along
 // with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 
-#include "siphash.h"
-
 inline static uint64_t
 u8to64_le (const unsigned char *p)
 {
@@ -23,7 +21,7 @@ u8to64_le (const unsigned char *p)
 		(uint64_t) p[7] << 56 ;
 }
 
-uint64_t
+static uint64_t
 siphash (const unsigned char key[16], const unsigned char *m, size_t len)
 {
 	uint64_t v0, v1, v2, v3;
