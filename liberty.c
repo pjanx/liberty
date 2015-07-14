@@ -872,6 +872,20 @@ str_map_find (struct str_map *self, const char *key)
 	return str_map_find_real (self, tmp);
 }
 
+static void *
+str_map_steal (struct str_map *self, const char *key)
+{
+	void *value = str_map_find (self, key);
+	if (value)
+	{
+		str_map_free_fn free_saved = self->free;
+		self->free = NULL;
+		str_map_set (self, key, NULL);
+		self->free = free_saved;
+	}
+	return value;
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // This iterator is intended for accessing and eventually adding links.
