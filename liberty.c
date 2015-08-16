@@ -2893,11 +2893,11 @@ regex_cache_match (struct str_map *cache, const char *regex, int flags,
 	return regexec (re, s, 0, NULL, 0) != REG_NOMATCH;
 }
 
-// --- Configuration -----------------------------------------------------------
+// --- Simple configuration ----------------------------------------------------
 
 // The keys are stripped of surrounding whitespace, the values are not.
 
-struct config_item
+struct simple_config_item
 {
 	const char *key;
 	const char *default_value;
@@ -2905,7 +2905,8 @@ struct config_item
 };
 
 static void
-load_config_defaults (struct str_map *config, const struct config_item *table)
+simple_config_load_defaults
+	(struct str_map *config, const struct simple_config_item *table)
 {
 	for (; table->key != NULL; table++)
 		if (table->default_value)
@@ -2915,7 +2916,7 @@ load_config_defaults (struct str_map *config, const struct config_item *table)
 }
 
 static bool
-read_config_file (struct str_map *config, struct error **e)
+simple_config_update_from_file (struct str_map *config, struct error **e)
 {
 	char *filename = resolve_filename
 		(PROGRAM_NAME ".conf", resolve_relative_config_filename);
@@ -2969,8 +2970,8 @@ read_config_file (struct str_map *config, struct error **e)
 }
 
 static char *
-write_default_config (const char *filename, const char *prolog,
-	const struct config_item *table, struct error **e)
+simple_config_write_default (const char *filename, const char *prolog,
+	const struct simple_config_item *table, struct error **e)
 {
 	struct str path, base;
 
@@ -3032,11 +3033,12 @@ error:
 	str_free (&base);
 	str_free (&path);
 	return NULL;
-
 }
 
+/// Convenience wrapper suitable for most simple applications
 static void
-call_write_default_config (const char *hint, const struct config_item *table)
+call_simple_config_write_default
+	(const char *hint, const struct simple_config_item *table)
 {
 	static const char *prolog =
 	"# " PROGRAM_NAME " " PROGRAM_VERSION " configuration file\n"
@@ -3046,7 +3048,7 @@ call_write_default_config (const char *hint, const struct config_item *table)
 	"\n";
 
 	struct error *e = NULL;
-	char *filename = write_default_config (hint, prolog, table, &e);
+	char *filename = simple_config_write_default (hint, prolog, table, &e);
 	if (!filename)
 	{
 		print_error ("%s", e->message);
