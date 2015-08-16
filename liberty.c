@@ -679,7 +679,8 @@ static bool
 set_blocking (int fd, bool blocking)
 {
 	int flags = fcntl (fd, F_GETFL);
-	hard_assert (flags != -1);
+	if (flags == -1)
+		exit_fatal ("%s: %s", "fcntl", strerror (errno));
 
 	bool prev = !(flags & O_NONBLOCK);
 	if (blocking)
