@@ -192,6 +192,12 @@ static bool g_soft_asserts_are_deadly;  ///< soft_assert() aborts as well
 			log_message (print_debug_data, "debug: ", __VA_ARGS__);            \
 	BLOCK_END
 
+// A few other debugging shorthands for when failures are allowed
+#define LOG_FUNC_FAILURE(name, desc)                                           \
+	print_debug ("%s: %s: %s", __func__, (name), (desc))
+#define LOG_LIBC_FAILURE(name)                                                 \
+	print_debug ("%s: %s: %s", __func__, (name), strerror (errno))
+
 static void
 assertion_failure_handler (bool is_fatal, const char *file, int line,
 	const char *function, const char *condition)
@@ -3382,6 +3388,244 @@ test_run (struct test *self)
 	str_map_free (&self->blacklist);
 	return 0;
 }
+
+// --- Connector ---------------------------------------------------------------
+
+#ifdef LIBERTY_WANT_POLLER
+
+// This is a helper that tries to establish a connection with any address on
+// a given list.  Sadly it also introduces a bit of a callback hell.
+
+struct connector_target
+{
+	LIST_HEADER (struct connector_target)
+
+	char *hostname;                     ///< Target hostname or address
+	char *service;                      ///< Target service name or port
+
+	struct addrinfo *results;           ///< Resolved target
+	struct addrinfo *iter;              ///< Current endpoint
+};
+
+static struct connector_target *
+connector_target_new (void)
+{
+	struct connector_target *self = xmalloc (sizeof *self);
+	return self;
+}
+
+static void
+connector_target_destroy (struct connector_target *self)
+{
+	free (self->hostname);
+	free (self->service);
+	freeaddrinfo (self->results);
+	free (self);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct connector
+{
+	int socket;                         ///< Socket FD for the connection
+	struct poller_fd connected_event;   ///< We've connected or failed
+	struct connector_target *targets;   ///< Targets
+	struct connector_target *targets_t; ///< Tail of targets
+
+	void *user_data;                    ///< User data for callbacks
+
+	// You may destroy the connector object in these two main callbacks:
+
+	/// Connection has been successfully established
+	void (*on_connected) (void *user_data, int socket);
+	/// Failed to establish a connection to either target
+	void (*on_failure) (void *user_data);
+
+	// Optional:
+
+	/// Connecting to a new address
+	void (*on_connecting) (void *user_data, const char *address);
+	/// Connecting to the last address has failed
+	void (*on_error) (void *user_data, const char *error);
+};
+
+static void
+connector_notify_connecting (struct connector *self,
+	struct connector_target *target, struct addrinfo *gai_iter)
+{
+	if (!self->on_connecting)
+		return;
+
+	const char *real_host = target->hostname;
+
+	// We don't really need this, so we can let it quietly fail
+	char buf[NI_MAXHOST];
+	int err = getnameinfo (gai_iter->ai_addr, gai_iter->ai_addrlen,
+		buf, sizeof buf, NULL, 0, NI_NUMERICHOST);
+	if (err)
+		LOG_FUNC_FAILURE ("getnameinfo", gai_strerror (err));
+	else
+		real_host = buf;
+
+	char *address = format_host_port_pair (real_host, target->service);
+	self->on_connecting (self->user_data, address);
+	free (address);
+}
+
+static void
+connector_notify_error (struct connector *self, const char *error)
+{
+	if (self->on_error)
+		self->on_error (self->user_data, error);
+}
+
+static void
+connector_prepare_next (struct connector *self)
+{
+	struct connector_target *target = self->targets;
+	if (!(target->iter = target->iter->ai_next))
+	{
+		LIST_UNLINK_WITH_TAIL (self->targets, self->targets_t, target);
+		connector_target_destroy (target);
+	}
+}
+
+static void
+connector_step (struct connector *self)
+{
+	struct connector_target *target = self->targets;
+	if (!target)
+	{
+		// Total failure, none of the targets has succeeded
+		self->on_failure (self->user_data);
+		return;
+	}
+
+	struct addrinfo *gai_iter = target->iter;
+	hard_assert (gai_iter != NULL);
+
+	connector_notify_connecting (self, target, gai_iter);
+
+	int fd = socket (gai_iter->ai_family,
+		gai_iter->ai_socktype, gai_iter->ai_protocol);
+	if (fd == -1)
+	{
+		connector_notify_error (self, strerror (errno));
+
+		connector_prepare_next (self);
+		connector_step (self);
+		return;
+	}
+
+	set_cloexec (fd);
+	set_blocking (fd, false);
+
+	int yes = 1;
+	soft_assert (setsockopt (fd, SOL_SOCKET, SO_KEEPALIVE,
+		&yes, sizeof yes) != -1);
+
+	if (!connect (fd, gai_iter->ai_addr, gai_iter->ai_addrlen))
+	{
+		set_blocking (fd, true);
+		self->on_connected (self->user_data, fd);
+		return;
+	}
+	if (errno != EINPROGRESS)
+	{
+		connector_notify_error (self, strerror (errno));
+		xclose (fd);
+
+		connector_prepare_next (self);
+		connector_step (self);
+		return;
+	}
+
+	self->connected_event.fd = self->socket = fd;
+	poller_fd_set (&self->connected_event, POLLOUT);
+
+	connector_prepare_next (self);
+}
+
+static void
+connector_on_ready (const struct pollfd *pfd, struct connector *self)
+{
+	// See http://cr.yp.to/docs/connect.html if this doesn't work.
+	// The second connect() method doesn't work with DragonflyBSD.
+
+	int error = 0;
+	socklen_t error_len = sizeof error;
+	hard_assert (!getsockopt (pfd->fd,
+		SOL_SOCKET, SO_ERROR, &error, &error_len));
+
+	if (error)
+	{
+		connector_notify_error (self, strerror (error));
+
+		poller_fd_reset (&self->connected_event);
+		xclose (self->socket);
+		self->socket = -1;
+
+		connector_step (self);
+	}
+	else
+	{
+		poller_fd_reset (&self->connected_event);
+		self->socket = -1;
+
+		set_blocking (pfd->fd, true);
+		self->on_connected (self->user_data, pfd->fd);
+	}
+}
+
+static void
+connector_init (struct connector *self, struct poller *poller)
+{
+	memset (self, 0, sizeof *self);
+	self->socket = -1;
+	poller_fd_init (&self->connected_event, poller, self->socket);
+	self->connected_event.user_data = self;
+	self->connected_event.dispatcher = (poller_fd_fn) connector_on_ready;
+}
+
+static void
+connector_free (struct connector *self)
+{
+	poller_fd_reset (&self->connected_event);
+	if (self->socket != -1)
+		xclose (self->socket);
+
+	LIST_FOR_EACH (struct connector_target, iter, self->targets)
+		connector_target_destroy (iter);
+}
+
+static bool
+connector_add_target (struct connector *self,
+	const char *hostname, const char *service, struct error **e)
+{
+	struct addrinfo hints, *results;
+	memset (&hints, 0, sizeof hints);
+	hints.ai_socktype = SOCK_STREAM;
+
+	// TODO: even this should be done asynchronously, most likely in
+	//   a thread pool, similarly to how libuv does it
+	int err = getaddrinfo (hostname, service, &hints, &results);
+	if (err)
+	{
+		error_set (e, "%s: %s", "getaddrinfo", gai_strerror (err));
+		return false;
+	}
+
+	struct connector_target *target = connector_target_new ();
+	target->hostname = xstrdup (hostname);
+	target->service = xstrdup (service);
+	target->results = results;
+	target->iter = target->results;
+
+	LIST_APPEND_WITH_TAIL (self->targets, self->targets_t, target);
+	return true;
+}
+
+#endif // LIBERTY_WANT_POLLER
 
 // --- Protocol modules --------------------------------------------------------
 
