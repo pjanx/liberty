@@ -2089,7 +2089,7 @@ msg_unpacker_u16 (struct msg_unpacker *self, uint16_t *value)
 {
 	UNPACKER_INT_BEGIN
 	*value
-		= (uint16_t) x[0] << 24 | (uint16_t) x[1] << 16;
+		= (uint16_t) x[0] << 8  | (uint16_t) x[1];
 	return true;
 }
 
