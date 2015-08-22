@@ -1421,7 +1421,7 @@ poller_run (struct poller *self)
 
 	int n_fds;
 	do
-		n_fds = epoll_wait (self->epoll_fd, self->revents, self->len,
+		n_fds = epoll_wait (self->epoll_fd, self->revents, self->alloc,
 			self->idle ? 0 : poller_timers_get_poll_timeout (&self->timers));
 	while (n_fds == -1 && errno == EINTR);
 
