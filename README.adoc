@@ -1,7 +1,7 @@
 liberty
 =======
 
-`liberty' is a pseudolibrary of all the common C code I have written for various
+'liberty' is a pseudolibrary of all the common C code I have written for various
 projects.  I used to copy-paste large swaths of code with minimal changes to it
 and it slowly became awfully painful to synchronize.  The project can be thought
 of as a successor to my other C library, libxtnd.
@@ -19,7 +19,7 @@ I'm not testing them at all.
 
 License
 -------
-`liberty' is written by Přemysl Janouch <p.janouch@gmail.com>.
+'liberty' is written by Přemysl Janouch <p.janouch@gmail.com>.
 
 You may use the software under the terms of the ISC license, the text of which
 is included within the package, or, at your option, you may relicense the work
