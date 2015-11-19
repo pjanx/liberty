@@ -2682,6 +2682,35 @@ get_xdg_home_dir (struct str *output, const char *var, const char *def)
 	}
 }
 
+static char *
+resolve_relative_filename_generic
+	(struct str_vector *paths, const char *tail, const char *filename)
+{
+	struct str file;
+	str_init (&file);
+
+	char *result = NULL;
+	for (unsigned i = 0; i < paths->len; i++)
+	{
+		// As per XDG spec, relative paths are ignored
+		if (*paths->vector[i] != '/')
+			continue;
+
+		str_reset (&file);
+		str_append_printf (&file, "%s/%s%s", paths->vector[i], tail, filename);
+
+		struct stat st;
+		if (!stat (file.str, &st))
+		{
+			result = str_steal (&file);
+			break;
+		}
+	}
+
+	str_free (&file);
+	return result;
+}
+
 static void
 get_xdg_config_dirs (struct str_vector *out)
 {
@@ -2692,8 +2721,73 @@ get_xdg_config_dirs (struct str_vector *out)
 	str_free (&config_home);
 
 	const char *xdg_config_dirs;
-	if ((xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
-		cstr_split_ignore_empty (xdg_config_dirs, ':', out);
+	if (!(xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
+		xdg_config_dirs = "/etc/xdg";
+	cstr_split_ignore_empty (xdg_config_dirs, ':', out);
+}
+
+static char *
+resolve_relative_config_filename (const char *filename)
+{
+	struct str_vector paths;
+	str_vector_init (&paths);
+	get_xdg_config_dirs (&paths);
+	char *result = resolve_relative_filename_generic
+		(&paths, PROGRAM_NAME "/", filename);
+	str_vector_free (&paths);
+	return result;
+}
+
+static void
+get_xdg_data_dirs (struct str_vector *out)
+{
+	struct str data_home;
+	str_init (&data_home);
+	get_xdg_home_dir (&data_home, "XDG_DATA_HOME", ".local/share");
+	str_vector_add (out, data_home.str);
+	str_free (&data_home);
+
+	const char *xdg_data_dirs;
+	if (!(xdg_data_dirs = getenv ("XDG_DATA_DIRS")))
+		xdg_data_dirs = "/usr/local/share/:/usr/share/";
+	cstr_split_ignore_empty (xdg_data_dirs, ':', out);
+}
+
+static char *
+resolve_relative_data_filename (const char *filename)
+{
+	struct str_vector paths;
+	str_vector_init (&paths);
+	get_xdg_data_dirs (&paths);
+	char *result = resolve_relative_filename_generic
+		(&paths, PROGRAM_NAME "/", filename);
+	str_vector_free (&paths);
+	return result;
+}
+
+static char *
+resolve_relative_runtime_filename (const char *filename)
+{
+	struct str path;
+	str_init (&path);
+
+	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
+	if (runtime_dir && *runtime_dir == '/')
+		str_append (&path, runtime_dir);
+	else
+		get_xdg_home_dir (&path, "XDG_DATA_HOME", ".local/share");
+	str_append_printf (&path, "/%s/%s", PROGRAM_NAME, filename);
+
+	// Try to create the file's ancestors;
+	// typically the user will want to immediately create a file in there
+	const char *last_slash = strrchr (path.str, '/');
+	if (last_slash && last_slash != path.str)
+	{
+		char *copy = xstrndup (path.str, last_slash - path.str);
+		(void) mkdir_with_parents (copy, NULL);
+		free (copy);
+	}
+	return str_steal (&path);
 }
 
 static char *
@@ -2725,65 +2819,6 @@ try_expand_tilde (const char *filename)
 		result = xstrdup_printf ("%s%s", pwd.pw_dir, filename + until_slash);
 	free (buf);
 	return result;
-}
-
-static char *
-resolve_relative_config_filename (const char *filename)
-{
-	struct str_vector paths;
-	str_vector_init (&paths);
-	get_xdg_config_dirs (&paths);
-
-	struct str file;
-	str_init (&file);
-
-	char *result = NULL;
-	for (unsigned i = 0; i < paths.len; i++)
-	{
-		// As per spec, relative paths are ignored
-		if (*paths.vector[i] != '/')
-			continue;
-
-		str_reset (&file);
-		str_append_printf (&file, "%s/" PROGRAM_NAME "/%s",
-			paths.vector[i], filename);
-
-		struct stat st;
-		if (!stat (file.str, &st))
-		{
-			result = str_steal (&file);
-			break;
-		}
-	}
-
-	str_vector_free (&paths);
-	str_free (&file);
-	return result;
-}
-
-static char *
-resolve_relative_runtime_filename (const char *filename)
-{
-	struct str path;
-	str_init (&path);
-
-	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
-	if (runtime_dir && *runtime_dir == '/')
-		str_append (&path, runtime_dir);
-	else
-		get_xdg_home_dir (&path, "XDG_DATA_HOME", ".local/share");
-	str_append_printf (&path, "/%s/%s", PROGRAM_NAME, filename);
-
-	// Try to create the file's ancestors;
-	// typically the user will want to immediately create a file in there
-	const char *last_slash = strrchr (path.str, '/');
-	if (last_slash && last_slash != path.str)
-	{
-		char *copy = xstrndup (path.str, last_slash - path.str);
-		(void) mkdir_with_parents (copy, NULL);
-		free (copy);
-	}
-	return str_steal (&path);
 }
 
 static char *
