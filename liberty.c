@@ -3583,8 +3583,9 @@ struct connector
 
 	// You may destroy the connector object in these two main callbacks:
 
-	/// Connection has been successfully established
-	void (*on_connected) (void *user_data, int socket);
+	/// Connection has been successfully established;
+	/// the hostname is mainly intended for TLS Server Name Indication
+	void (*on_connected) (void *user_data, int socket, const char *hostname);
 	/// Failed to establish a connection to either target
 	void (*on_failure) (void *user_data);
 
@@ -3624,6 +3625,13 @@ connector_notify_error (struct connector *self, const char *error)
 {
 	if (self->on_error)
 		self->on_error (self->user_data, error);
+}
+
+static void
+connector_notify_connected (struct connector *self, int fd)
+{
+	set_blocking (fd, true);
+	self->on_connected (self->user_data, fd, self->targets->hostname);
 }
 
 static void
@@ -3672,25 +3680,20 @@ connector_step (struct connector *self)
 		&yes, sizeof yes) != -1);
 
 	if (!connect (fd, gai_iter->ai_addr, gai_iter->ai_addrlen))
+		connector_notify_connected (self, fd);
+	else if (errno == EINPROGRESS)
 	{
-		set_blocking (fd, true);
-		self->on_connected (self->user_data, fd);
-		return;
+		self->connected_event.fd = self->socket = fd;
+		poller_fd_set (&self->connected_event, POLLOUT);
 	}
-	if (errno != EINPROGRESS)
+	else
 	{
 		connector_notify_error (self, strerror (errno));
 		xclose (fd);
 
 		connector_prepare_next (self);
 		connector_step (self);
-		return;
 	}
-
-	self->connected_event.fd = self->socket = fd;
-	poller_fd_set (&self->connected_event, POLLOUT);
-
-	connector_prepare_next (self);
 }
 
 static void
@@ -3712,15 +3715,14 @@ connector_on_ready (const struct pollfd *pfd, struct connector *self)
 		xclose (self->socket);
 		self->socket = -1;
 
+		connector_prepare_next (self);
 		connector_step (self);
 	}
 	else
 	{
 		poller_fd_reset (&self->connected_event);
 		self->socket = -1;
-
-		set_blocking (pfd->fd, true);
-		self->on_connected (self->user_data, pfd->fd);
+		connector_notify_connected (self, pfd->fd);
 	}
 }
 
