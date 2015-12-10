@@ -339,6 +339,14 @@ test_utf8 (void)
 	const char invalid[] = "\xf0\x90\x28\xbc";
 	soft_assert ( utf8_validate (valid,   sizeof valid));
 	soft_assert (!utf8_validate (invalid, sizeof invalid));
+
+	struct utf8_iter iter;
+	utf8_iter_init (&iter, "fóọ");
+
+	size_t ch_len;
+	hard_assert (utf8_iter_next (&iter, &ch_len) == 'f'    && ch_len == 1);
+	hard_assert (utf8_iter_next (&iter, &ch_len) == 0x00F3 && ch_len == 2);
+	hard_assert (utf8_iter_next (&iter, &ch_len) == 0x1ECD && ch_len == 3);
 }
 
 static void
