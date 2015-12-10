@@ -2242,14 +2242,11 @@ utf8_next (const char *s, size_t len, int32_t *codepoint)
 	if (!len)
 		return NULL;
 
-	// In the middle of a character -> error
-	const uint8_t *p = (const unsigned char *) s;
-	if ((*p & 0xC0) == 0x80)
-		return NULL;
+	// Find out how long the sequence is (0 for ASCII)
+	unsigned mask = 0x80;
+	unsigned sequence_len = 0;
 
-	// Find out how long the sequence is
-	unsigned mask = 0xC0;
-	unsigned tail_len = 0;
+	const uint8_t *p = (const uint8_t *) s;
 	while ((*p & mask) == mask)
 	{
 		// Invalid start of sequence
@@ -2257,15 +2254,16 @@ utf8_next (const char *s, size_t len, int32_t *codepoint)
 			return NULL;
 
 		mask |= mask >> 1;
-		tail_len++;
+		sequence_len++;
 	}
 
-	// Check the rest of the sequence
-	if (tail_len > --len)
+	// In the middle of a character or the input is too short
+	if (sequence_len == 1 || sequence_len > len)
 		return NULL;
 
+	// Check the rest of the sequence
 	uint32_t cp = *p++ & ~mask;
-	while (tail_len--)
+	while (sequence_len && --sequence_len)
 	{
 		if ((*p & 0xC0) != 0x80)
 			return NULL;
