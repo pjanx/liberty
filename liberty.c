@@ -3275,6 +3275,7 @@ struct test
 	struct str_map blacklist;           ///< Blacklisted tests
 
 	unsigned list_only : 1;             ///< Just list all tests
+	unsigned can_fork  : 1;             ///< Forking doesn't break anything
 };
 
 static void
@@ -3284,12 +3285,16 @@ test_init (struct test *self, int argc, char **argv)
 	str_map_init (&self->whitelist);
 	str_map_init (&self->blacklist);
 
+	// Usually this shouldn't pose a problem but let's make it optional
+	self->can_fork = true;
+
 	static const struct opt opts[] =
 	{
 		{ 'd', "debug", NULL, 0, "run in debug mode" },
 		{ 'h', "help", NULL, 0, "display this help and exit" },
 		{ 'p', "pass", "NAME", 0, "only run tests glob-matching the name" },
 		{ 's', "skip", "NAME", 0, "skip all tests glob-matching the name" },
+		{ 'S', "single-process", NULL, 0, "don't fork for each test" },
 		{ 'l', "list", NULL, 0, "list all available tests" },
 		{ 0, NULL, NULL, 0, NULL }
 	};
@@ -3313,9 +3318,10 @@ test_init (struct test *self, int argc, char **argv)
 	case 's':
 		str_map_set (&self->blacklist, optarg, (void *) 1);
 		break;
-	case 'l':
-		self->list_only = true;
-		break;
+
+	case 'S':  self->can_fork = false;  break;
+	case 'l':  self->list_only = true;  break;
+
 	default:
 		print_error ("wrong options");
 		opt_handler_usage (&oh, stderr);
@@ -3383,32 +3389,80 @@ test_is_allowed (struct test *self, const char *name)
 	return allowed;
 }
 
+static void
+test_unit_run (struct test_unit *self)
+{
+	void *fixture = xcalloc (1, self->fixture_size);
+	if (self->setup)
+		self->setup (self->user_data, fixture);
+
+	self->test (self->user_data, fixture);
+
+	if (self->teardown)
+		self->teardown (self->user_data, fixture);
+	free (fixture);
+}
+
+static bool
+test_unit_run_forked (struct test_unit *self)
+{
+	pid_t child = fork ();
+	if (child == -1)
+	{
+		print_error ("%s: %s", "fork", strerror (errno));
+		return false;
+	}
+	else if (!child)
+	{
+		test_unit_run (self);
+		_exit (EXIT_SUCCESS);
+	}
+
+	int status = 0;
+	if (waitpid (child, &status, WUNTRACED) == -1)
+		print_error ("%s: %s", "waitpid", strerror (errno));
+	else if (WIFSTOPPED (status))
+	{
+		print_error ("test child has been stopped");
+		(void) kill (child, SIGKILL);
+	}
+	else if (WIFSIGNALED (status))
+		print_error ("test child was killed by signal %d", WTERMSIG (status));
+	else if (WEXITSTATUS (status) != 0)
+		print_error ("test child exited with status %d", WEXITSTATUS (status));
+	else
+		return true;
+	return false;
+}
+
+static bool
+test_run_unit (struct test *self, struct test_unit *unit)
+{
+	fprintf (stderr, "%s: ", unit->name);
+
+	if (!self->can_fork)
+		test_unit_run (unit);
+	else if (!test_unit_run_forked (unit))
+		return false;
+
+	fprintf (stderr, "OK\n");
+	return true;
+}
+
 static int
 test_run (struct test *self)
 {
 	g_soft_asserts_are_deadly = true;
+
+	bool failure = false;
 	LIST_FOR_EACH (struct test_unit, iter, self->tests)
 	{
 		if (!test_is_allowed (self, iter->name))
 			continue;
-
 		if (self->list_only)
-		{
 			printf ("%s\n", iter->name);
-			continue;
-		}
-
-		void *fixture = xcalloc (1, iter->fixture_size);
-		if (iter->setup)
-			iter->setup (iter->user_data, fixture);
-
-		fprintf (stderr, "%s: ", iter->name);
-		iter->test (iter->user_data, fixture);
-		fprintf (stderr, "OK\n");
-
-		if (iter->teardown)
-			iter->teardown (iter->user_data, fixture);
-		free (fixture);
+		else if (!test_run_unit (self, iter))
+			failure = true;
 	}
 
 	LIST_FOR_EACH (struct test_unit, iter, self->tests)
@@ -3419,7 +3473,7 @@ test_run (struct test *self)
 
 	str_map_free (&self->whitelist);
 	str_map_free (&self->blacklist);
-	return 0;
+	return failure;
 }
 
 // --- Connector ---------------------------------------------------------------
