@@ -29,9 +29,11 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <inttypes.h>
 #include <ctype.h>
 #include <time.h>
 #include <limits.h>
+#include <setjmp.h>
 
 #include <unistd.h>
 #include <sys/wait.h>
@@ -2452,6 +2454,18 @@ base64_encode (const void *data, size_t len, struct str *output)
 // --- Utilities ---------------------------------------------------------------
 
 static void
+cstr_split (const char *s, const char *delimiters, struct str_vector *out)
+{
+	const char *begin = s, *end;
+	while ((end = strpbrk (begin, delimiters)))
+	{
+		str_vector_add_owned (out, xstrndup (begin, end - begin));
+		begin = ++end;
+	}
+	str_vector_add (out, begin);
+}
+
+static void
 cstr_split_ignore_empty (const char *s, char delimiter, struct str_vector *out)
 {
 	const char *begin = s, *end;
@@ -3713,6 +3727,1110 @@ connector_add_target (struct connector *self,
 }
 
 #endif // LIBERTY_WANT_POLLER
+
+// --- Advanced configuration --------------------------------------------------
+
+// This is a more powerful configuration format, adding key-value maps and
+// simplifying item validation and dynamic handling of changes.  All strings
+// must be encoded in UTF-8.
+
+enum config_item_type
+{
+	CONFIG_ITEM_NULL,                   ///< No value
+	CONFIG_ITEM_OBJECT,                 ///< Key-value map
+	CONFIG_ITEM_BOOLEAN,                ///< Truth value
+	CONFIG_ITEM_INTEGER,                ///< Integer
+	CONFIG_ITEM_STRING,                 ///< Arbitrary string of characters
+	CONFIG_ITEM_STRING_ARRAY            ///< Comma-separated list of strings
+};
+
+struct config_item
+{
+	enum config_item_type type;         ///< Type of the item
+	union
+	{
+		struct str_map object;          ///< Key-value data
+		bool boolean;                   ///< Boolean data
+		int64_t integer;                ///< Integer data
+		struct str string;              ///< String data
+	}
+	value;                              ///< The value of this item
+
+	struct config_schema *schema;       ///< Schema describing this value
+	void *user_data;                    ///< User value attached by schema owner
+};
+
+struct config_schema
+{
+	const char *name;                   ///< Name of the item
+	const char *comment;                ///< User-readable description
+
+	enum config_item_type type;         ///< Required type
+	const char *default_;               ///< Default as a configuration snippet
+
+	/// Check if the new value can be accepted.
+	/// In addition to this, "type" and having a default is considered.
+	bool (*validate) (const struct config_item *, struct error **e);
+
+	/// The value has changed
+	void (*on_change) (struct config_item *);
+};
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static const char *
+config_item_type_name (enum config_item_type type)
+{
+	switch (type)
+	{
+	case CONFIG_ITEM_NULL:          return "null";
+	case CONFIG_ITEM_BOOLEAN:       return "boolean";
+	case CONFIG_ITEM_INTEGER:       return "integer";
+	case CONFIG_ITEM_STRING:        return "string";
+	case CONFIG_ITEM_STRING_ARRAY:  return "string array";
+
+	default:
+		hard_assert (!"invalid config item type value");
+		return NULL;
+	}
+}
+
+static bool
+config_item_type_is_string (enum config_item_type type)
+{
+	return type == CONFIG_ITEM_STRING
+		|| type == CONFIG_ITEM_STRING_ARRAY;
+}
+
+static void
+config_item_free (struct config_item *self)
+{
+	switch (self->type)
+	{
+	case CONFIG_ITEM_STRING:
+	case CONFIG_ITEM_STRING_ARRAY:
+		str_free (&self->value.string);
+		break;
+	case CONFIG_ITEM_OBJECT:
+		str_map_free (&self->value.object);
+	default:
+		break;
+	}
+}
+
+static void
+config_item_destroy (struct config_item *self)
+{
+	config_item_free (self);
+	free (self);
+}
+
+/// Doesn't do any validations or handle schemas, just moves source data
+/// to the target item and destroys the source item
+static void
+config_item_move (struct config_item *self, struct config_item *source)
+{
+	// Not quite sure how to handle that
+	hard_assert (!source->schema);
+
+	config_item_free (self);
+	self->type = source->type;
+	memcpy (&self->value, &source->value, sizeof source->value);
+	free (source);
+}
+
+static struct config_item *
+config_item_new (enum config_item_type type)
+{
+	struct config_item *self = xcalloc (1, sizeof *self);
+	self->type = type;
+	return self;
+}
+
+static struct config_item *
+config_item_null (void)
+{
+	return config_item_new (CONFIG_ITEM_NULL);
+}
+
+static struct config_item *
+config_item_boolean (bool b)
+{
+	struct config_item *self = config_item_new (CONFIG_ITEM_BOOLEAN);
+	self->value.boolean = b;
+	return self;
+}
+
+static struct config_item *
+config_item_integer (int64_t i)
+{
+	struct config_item *self = config_item_new (CONFIG_ITEM_INTEGER);
+	self->value.integer = i;
+	return self;
+}
+
+static struct config_item *
+config_item_string (const struct str *s)
+{
+	struct config_item *self = config_item_new (CONFIG_ITEM_STRING);
+	str_init (&self->value.string);
+	hard_assert (utf8_validate
+		(self->value.string.str, self->value.string.len));
+	if (s) str_append_str (&self->value.string, s);
+	return self;
+}
+
+static struct config_item *
+config_item_string_from_cstr (const char *s)
+{
+	struct str tmp;
+	str_init (&tmp);
+	str_append (&tmp, s);
+	struct config_item *self = config_item_string (&tmp);
+	str_free (&tmp);
+	return self;
+}
+
+static struct config_item *
+config_item_string_array (const struct str *s)
+{
+	struct config_item *self = config_item_string (s);
+	self->type = CONFIG_ITEM_STRING_ARRAY;
+	return self;
+}
+
+static struct config_item *
+config_item_object (void)
+{
+	struct config_item *self = config_item_new (CONFIG_ITEM_OBJECT);
+	str_map_init (&self->value.object);
+	self->value.object.free = (void (*)(void *)) config_item_destroy;
+	return self;
+}
+
+static bool
+config_schema_accepts_type
+	(struct config_schema *self, enum config_item_type type)
+{
+	if (self->type == type)
+		return true;
+	// This is a bit messy but it has its purpose
+	if (config_item_type_is_string (self->type)
+	 && config_item_type_is_string (type))
+		return true;
+	return !self->default_ && type == CONFIG_ITEM_NULL;
+}
+
+static bool
+config_item_validate_by_schema (struct config_item *self,
+	struct config_schema *schema, struct error **e)
+{
+	struct error *error = NULL;
+	if (!config_schema_accepts_type (schema, self->type))
+		error_set (e, "invalid type of value, expected: %s%s",
+			config_item_type_name (schema->type),
+			!schema->default_ ? " (or null)" : "");
+	else if (schema->validate && !schema->validate (self, &error))
+	{
+		error_set (e, "%s: %s", "invalid value", error->message);
+		error_free (error);
+	}
+	else
+		return true;
+	return false;
+}
+
+static bool
+config_item_set_from (struct config_item *self, struct config_item *source,
+	struct error **e)
+{
+	struct config_schema *schema = self->schema;
+	if (!schema)
+	{
+		// Easy, we don't know what this item is
+		config_item_move (self, source);
+		return true;
+	}
+
+	if (!config_item_validate_by_schema (source, schema, e))
+		return false;
+
+	// Make sure the string subtype fits the schema
+	if (config_item_type_is_string (source->type)
+	 && config_item_type_is_string (schema->type))
+		source->type = schema->type;
+
+	config_item_move (self, source);
+
+	// Notify owner about the change so that they can apply it
+	if (schema->on_change)
+		schema->on_change (self);
+	return true;
+}
+
+static struct config_item *
+config_item_get (struct config_item *self, const char *path, struct error **e)
+{
+	hard_assert (self->type == CONFIG_ITEM_OBJECT);
+
+	struct str_vector v;
+	str_vector_init (&v);
+	cstr_split (path, ".", &v);
+
+	struct config_item *result = NULL;
+	size_t i = 0;
+	while (true)
+	{
+		const char *key = v.vector[i];
+		if (!*key)
+			error_set (e, "empty path element");
+		else if (!(self = str_map_find (&self->value.object, key)))
+			error_set (e, "`%s' not found in object", key);
+		else if (++i == v.len)
+			result = self;
+		else if (self->type != CONFIG_ITEM_OBJECT)
+			error_set (e, "`%s' is not an object", key);
+		else
+			continue;
+		break;
+	}
+	str_vector_free (&v);
+	return result;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct config_writer
+{
+	struct str *output;
+	unsigned indent;
+};
+
+static void config_item_write_object_innards
+	(struct config_writer *self, struct config_item *object);
+
+static void
+config_item_write_string (struct str *output, const struct str *s)
+{
+	str_append_c (output, '"');
+	for (size_t i = 0; i < s->len; i++)
+	{
+		unsigned char c = s->str[i];
+		if      (c == '\n')  str_append        (output, "\\n");
+		else if (c == '\r')  str_append        (output, "\\r");
+		else if (c == '\t')  str_append        (output, "\\t");
+		else if (c == '\\')  str_append        (output, "\\\\");
+		else if (c == '"')   str_append        (output, "\\\"");
+		else if (c < 32)     str_append_printf (output, "\\x%02x", c);
+		else                 str_append_c      (output, c);
+	}
+	str_append_c (output, '"');
+}
+
+static void
+config_item_write_object
+	(struct config_writer *self, struct config_item *value)
+{
+	char indent[self->indent + 1];
+	memset (indent, '\t', self->indent);
+	indent[self->indent] = 0;
+
+	str_append_c (self->output, '{');
+	if (value->value.object.len)
+	{
+		self->indent++;
+		str_append_c (self->output, '\n');
+		config_item_write_object_innards (self, value);
+		self->indent--;
+		str_append (self->output, indent);
+	}
+	str_append_c (self->output, '}');
+}
+
+static void
+config_item_write_value (struct config_writer *self, struct config_item *value)
+{
+	switch (value->type)
+	{
+	case CONFIG_ITEM_NULL:
+		str_append (self->output, "null");
+		break;
+	case CONFIG_ITEM_BOOLEAN:
+		str_append (self->output, value->value.boolean ? "on" : "off");
+		break;
+	case CONFIG_ITEM_INTEGER:
+		str_append_printf (self->output, "%" PRIi64, value->value.integer);
+		break;
+	case CONFIG_ITEM_STRING:
+	case CONFIG_ITEM_STRING_ARRAY:
+		config_item_write_string (self->output, &value->value.string);
+		break;
+	case CONFIG_ITEM_OBJECT:
+		config_item_write_object (self, value);
+		break;
+	default:
+		hard_assert (!"invalid item type");
+	}
+}
+
+static void
+config_item_write_kv_pair (struct config_writer *self,
+	const char *key, struct config_item *value)
+{
+	char indent[self->indent + 1];
+	memset (indent, '\t', self->indent);
+	indent[self->indent] = 0;
+
+	if (value->schema && value->schema->comment)
+		str_append_printf (self->output,
+			"%s# %s\n", indent, value->schema->comment);
+
+	str_append_printf (self->output, "%s%s = ", indent, key);
+	config_item_write_value (self, value);
+	str_append_c (self->output, '\n');
+}
+
+static void
+config_item_write_object_innards
+	(struct config_writer *self, struct config_item *object)
+{
+	hard_assert (object->type == CONFIG_ITEM_OBJECT);
+
+	struct str_map_iter iter;
+	str_map_iter_init (&iter, &object->value.object);
+
+	struct config_item *value;
+	while ((value = str_map_iter_next (&iter)))
+		config_item_write_kv_pair (self, iter.link->key, value);
+}
+
+static void
+config_item_write (struct config_item *value,
+	bool object_innards, struct str *output)
+{
+	struct config_writer writer = { .output = output, .indent = 0 };
+	if (object_innards)
+		config_item_write_object_innards (&writer, value);
+	else
+		config_item_write_value (&writer, value);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+enum config_token
+{
+	CONFIG_T_ABORT,                     ///< EOF or error
+
+	CONFIG_T_WORD,                      ///< [a-zA-Z0-9_]+
+	CONFIG_T_EQUALS,                    ///< Equal sign
+	CONFIG_T_LBRACE,                    ///< Left curly bracket
+	CONFIG_T_RBRACE,                    ///< Right curly bracket
+	CONFIG_T_NEWLINE,                   ///< New line
+
+	CONFIG_T_NULL,                      ///< CONFIG_ITEM_NULL
+	CONFIG_T_BOOLEAN,                   ///< CONFIG_ITEM_BOOLEAN
+	CONFIG_T_INTEGER,                   ///< CONFIG_ITEM_INTEGER
+	CONFIG_T_STRING                     ///< CONFIG_ITEM_STRING{,_LIST}
+};
+
+static const char *
+config_token_name (enum config_token token)
+{
+	switch (token)
+	{
+	case CONFIG_T_ABORT:    return "end of input";
+
+	case CONFIG_T_WORD:     return "word";
+	case CONFIG_T_EQUALS:   return "equal sign";
+	case CONFIG_T_LBRACE:   return "left brace";
+	case CONFIG_T_RBRACE:   return "right brace";
+	case CONFIG_T_NEWLINE:  return "newline";
+
+	case CONFIG_T_NULL:     return "null value";
+	case CONFIG_T_BOOLEAN:  return "boolean";
+	case CONFIG_T_INTEGER:  return "integer";
+	case CONFIG_T_STRING:   return "string";
+
+	default:
+		hard_assert (!"invalid token value");
+		return NULL;
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct config_tokenizer
+{
+	const char *p;                      ///< Current position in input
+	size_t len;                         ///< How many bytes of input are left
+
+	bool report_line;                   ///< Whether to count lines at all
+	unsigned line;                      ///< Current line
+	unsigned column;                    ///< Current column
+
+	int64_t integer;                    ///< Parsed boolean or integer value
+	struct str string;                  ///< Parsed string value
+};
+
+/// Input has to be null-terminated anyway
+static void
+config_tokenizer_init (struct config_tokenizer *self, const char *p, size_t len)
+{
+	memset (self, 0, sizeof *self);
+	self->p = p;
+	self->len = len;
+	self->report_line = true;
+	str_init (&self->string);
+}
+
+static void
+config_tokenizer_free (struct config_tokenizer *self)
+{
+	str_free (&self->string);
+}
+
+static bool
+config_tokenizer_is_word_char (int c)
+{
+	return isalnum_ascii (c) || c == '_';
+}
+
+static int
+config_tokenizer_advance (struct config_tokenizer *self)
+{
+	int c = *self->p++;
+	if (c == '\n' && self->report_line)
+	{
+		self->column = 0;
+		self->line++;
+	}
+	else
+		self->column++;
+
+	self->len--;
+	return c;
+}
+
+static void config_tokenizer_error (struct config_tokenizer *self,
+	struct error **e, const char *format, ...) ATTRIBUTE_PRINTF (3, 4);
+
+static void
+config_tokenizer_error (struct config_tokenizer *self,
+	struct error **e, const char *format, ...)
+{
+	struct str description;
+	str_init (&description);
+
+	va_list ap;
+	va_start (ap, format);
+	str_append_vprintf (&description, format, ap);
+	va_end (ap);
+
+	if (self->report_line)
+		error_set (e, "near line %u, column %u: %s",
+			self->line + 1, self->column + 1, description.str);
+	else if (self->len)
+		error_set (e, "near character %u: %s",
+			self->column + 1, description.str);
+	else
+		error_set (e, "near end: %s", description.str);
+
+	str_free (&description);
+}
+
+static bool
+config_tokenizer_hexa_escape (struct config_tokenizer *self, struct str *output)
+{
+	int i;
+	unsigned char code = 0;
+
+	for (i = 0; self->len && i < 2; i++)
+	{
+		unsigned char c = tolower_ascii (*self->p);
+		if (c >= '0' && c <= '9')
+			code = (code << 4) | (c - '0');
+		else if (c >= 'a' && c <= 'f')
+			code = (code << 4) | (c - 'a' + 10);
+		else
+			break;
+
+		config_tokenizer_advance (self);
+	}
+
+	if (!i)
+		return false;
+
+	str_append_c (output, code);
+	return true;
+}
+
+static bool
+config_tokenizer_octal_escape
+	(struct config_tokenizer *self, struct str *output)
+{
+	int i;
+	unsigned char code = 0;
+
+	for (i = 0; self->len && i < 3; i++)
+	{
+		unsigned char c = *self->p;
+		if (c >= '0' && c <= '7')
+			code = (code << 3) | (c - '0');
+		else
+			break;
+
+		config_tokenizer_advance (self);
+	}
+
+	if (!i)
+		return false;
+
+	str_append_c (output, code);
+	return true;
+}
+
+static bool
+config_tokenizer_escape_sequence
+	(struct config_tokenizer *self, struct str *output, struct error **e)
+{
+	if (!self->len)
+	{
+		config_tokenizer_error (self, e, "premature end of escape sequence");
+		return false;
+	}
+
+	unsigned char c;
+	switch ((c = *self->p))
+	{
+	case '"':              break;
+	case '\\':             break;
+	case 'a':   c = '\a';  break;
+	case 'b':   c = '\b';  break;
+	case 'f':   c = '\f';  break;
+	case 'n':   c = '\n';  break;
+	case 'r':   c = '\r';  break;
+	case 't':   c = '\t';  break;
+	case 'v':   c = '\v';  break;
+
+	case 'x':
+	case 'X':
+		config_tokenizer_advance (self);
+		if (config_tokenizer_hexa_escape (self, output))
+			return true;
+
+		config_tokenizer_error (self, e, "invalid hexadecimal escape");
+		return false;
+
+	default:
+		if (config_tokenizer_octal_escape (self, output))
+			return true;
+
+		config_tokenizer_error (self, e, "unknown escape sequence");
+		return false;
+	}
+
+	str_append_c (output, c);
+	config_tokenizer_advance (self);
+	return true;
+}
+
+static bool
+config_tokenizer_string
+	(struct config_tokenizer *self, struct str *output, struct error **e)
+{
+	unsigned char c;
+	while (self->len)
+	{
+		if ((c = config_tokenizer_advance (self)) == '"')
+			return true;
+		if (c != '\\')
+			str_append_c (output, c);
+		else if (!config_tokenizer_escape_sequence (self, output, e))
+			return false;
+	}
+	config_tokenizer_error (self, e, "premature end of string");
+	return false;
+}
+
+static enum config_token
+config_tokenizer_next (struct config_tokenizer *self, struct error **e)
+{
+	// Skip over any whitespace between tokens
+	while (self->len && isspace_ascii (*self->p) && *self->p != '\n')
+		config_tokenizer_advance (self);
+	if (!self->len)
+		return CONFIG_T_ABORT;
+
+	switch (*self->p)
+	{
+	case '\n':  config_tokenizer_advance (self);  return CONFIG_T_NEWLINE;
+	case '=':   config_tokenizer_advance (self);  return CONFIG_T_EQUALS;
+	case '{':   config_tokenizer_advance (self);  return CONFIG_T_LBRACE;
+	case '}':   config_tokenizer_advance (self);  return CONFIG_T_RBRACE;
+
+	case '#':
+		// Comments go until newline
+		while (self->len)
+			if (config_tokenizer_advance (self) == '\n')
+				return CONFIG_T_NEWLINE;
+		return CONFIG_T_ABORT;
+
+	case '"':
+		config_tokenizer_advance (self);
+		str_reset (&self->string);
+		if (!config_tokenizer_string (self, &self->string, e))
+			return CONFIG_T_ABORT;
+		if (!utf8_validate (self->string.str, self->string.len))
+		{
+			config_tokenizer_error (self, e, "not a valid UTF-8 string");
+			return CONFIG_T_ABORT;
+		}
+		return CONFIG_T_STRING;
+	}
+
+	char *end;
+	errno = 0;
+	self->integer = strtoll (self->p, &end, 10);
+	if (errno == ERANGE)
+	{
+		config_tokenizer_error (self, e, "integer out of range");
+		return CONFIG_T_ABORT;
+	}
+	if (end != self->p)
+	{
+		self->len -= end - self->p;
+		self->p = end;
+		return CONFIG_T_INTEGER;
+	}
+
+	if (!config_tokenizer_is_word_char (*self->p))
+	{
+		config_tokenizer_error (self, e, "invalid input");
+		return CONFIG_T_ABORT;
+	}
+
+	str_reset (&self->string);
+	do
+		str_append_c (&self->string, config_tokenizer_advance (self));
+	while (config_tokenizer_is_word_char (*self->p));
+
+	if (!strcmp (self->string.str, "null"))
+		return CONFIG_T_NULL;
+
+	bool boolean;
+	if (!set_boolean_if_valid (&boolean, self->string.str))
+		return CONFIG_T_WORD;
+
+	self->integer = boolean;
+	return CONFIG_T_BOOLEAN;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+struct config_parser
+{
+	struct config_tokenizer tokenizer;  ///< Tokenizer
+
+	struct error *error;                ///< Tokenizer error
+	enum config_token token;            ///< Current token in the tokenizer
+	bool replace_token;                 ///< Replace the token
+};
+
+static void
+config_parser_init (struct config_parser *self, const char *script, size_t len)
+{
+	memset (self, 0, sizeof *self);
+	config_tokenizer_init (&self->tokenizer, script, len);
+
+	// As reading in tokens may cause exceptions, we wait for the first peek()
+	// to replace the initial CONFIG_T_ABORT.
+	self->replace_token = true;
+}
+
+static void
+config_parser_free (struct config_parser *self)
+{
+	config_tokenizer_free (&self->tokenizer);
+	if (self->error)
+		error_free (self->error);
+}
+
+static enum config_token
+config_parser_peek (struct config_parser *self, jmp_buf out)
+{
+	if (self->replace_token)
+	{
+		self->token = config_tokenizer_next (&self->tokenizer, &self->error);
+		if (self->error)
+			longjmp (out, 1);
+		self->replace_token = false;
+	}
+	return self->token;
+}
+
+static bool
+config_parser_accept
+	(struct config_parser *self, enum config_token token, jmp_buf out)
+{
+	return self->replace_token = (config_parser_peek (self, out) == token);
+}
+
+static void
+config_parser_expect
+	(struct config_parser *self, enum config_token token, jmp_buf out)
+{
+	if (config_parser_accept (self, token, out))
+		return;
+
+	config_tokenizer_error (&self->tokenizer, &self->error,
+		"unexpected `%s', expected `%s'",
+		config_token_name (self->token),
+		config_token_name (token));
+	longjmp (out, 1);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// We don't need no generator, but a few macros will come in handy.
+// From time to time C just doesn't have the right features.
+
+#define PEEK()         config_parser_peek   (self, err)
+#define ACCEPT(token)  config_parser_accept (self, token, err)
+#define EXPECT(token)  config_parser_expect (self, token, err)
+#define SKIP_NL()      do {} while (ACCEPT (CONFIG_T_NEWLINE))
+
+static struct config_item *config_parser_parse_object
+	(struct config_parser *self, jmp_buf out);
+
+static struct config_item *
+config_parser_parse_value (struct config_parser *self, jmp_buf out)
+{
+	struct config_item *volatile result = NULL;
+	jmp_buf err;
+
+	if (setjmp (err))
+	{
+		if (result)
+			config_item_destroy (result);
+		longjmp (out, 1);
+	}
+
+	if (ACCEPT (CONFIG_T_LBRACE))
+	{
+		result = config_parser_parse_object (self, out);
+		SKIP_NL ();
+		EXPECT (CONFIG_T_RBRACE);
+		return result;
+	}
+	if (ACCEPT (CONFIG_T_NULL))
+		return config_item_null ();
+	if (ACCEPT (CONFIG_T_BOOLEAN))
+		return config_item_boolean (self->tokenizer.integer);
+	if (ACCEPT (CONFIG_T_INTEGER))
+		return config_item_integer (self->tokenizer.integer);
+	if (ACCEPT (CONFIG_T_STRING))
+		return config_item_string (&self->tokenizer.string);
+
+	config_tokenizer_error (&self->tokenizer, &self->error,
+		"unexpected `%s', expected a value",
+		config_token_name (self->token));
+	longjmp (out, 1);
+}
+
+/// Parse a single "key = value" assignment into @a object
+static bool
+config_parser_parse_kv_pair (struct config_parser *self,
+	struct config_item *object, jmp_buf out)
+{
+	char *volatile key = NULL;
+	jmp_buf err;
+
+	if (setjmp (err))
+	{
+		free (key);
+		longjmp (out, 1);
+	}
+
+	SKIP_NL ();
+
+	// Either this object's closing right brace if called recursively,
+	// or end of file when called on a whole configuration file
+	if (PEEK () == CONFIG_T_RBRACE
+	 || PEEK () == CONFIG_T_ABORT)
+		return false;
+
+	EXPECT (CONFIG_T_WORD);
+	key = xstrdup (self->tokenizer.string.str);
+	SKIP_NL ();
+
+	EXPECT (CONFIG_T_EQUALS);
+	SKIP_NL ();
+
+	str_map_set (&object->value.object, key,
+		config_parser_parse_value (self, err));
+
+	free (key);
+	key = NULL;
+
+	if (PEEK () == CONFIG_T_RBRACE
+	 || PEEK () == CONFIG_T_ABORT)
+		return false;
+
+	EXPECT (CONFIG_T_NEWLINE);
+	return true;
+}
+
+/// Parse the inside of an object definition
+static struct config_item *
+config_parser_parse_object (struct config_parser *self, jmp_buf out)
+{
+	struct config_item *volatile object = config_item_object ();
+	jmp_buf err;
+
+	if (setjmp (err))
+	{
+		config_item_destroy (object);
+		longjmp (out, 1);
+	}
+
+	while (config_parser_parse_kv_pair (self, object, err))
+		;
+	return object;
+}
+
+#undef PEEK
+#undef ACCEPT
+#undef EXPECT
+#undef SKIP_NL
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+/// Parse a configuration snippet either as an object or a bare value.
+/// If it's the latter (@a single_value_only), no newlines may follow.
+static struct config_item *
+config_item_parse (const char *script, size_t len,
+	bool single_value_only, struct error **e)
+{
+	struct config_parser parser;
+	config_parser_init (&parser, script, len);
+
+	struct config_item *volatile object = NULL;
+	jmp_buf err;
+
+	if (setjmp (err))
+	{
+		if (object)
+		{
+			config_item_destroy (object);
+			object = NULL;
+		}
+
+		error_propagate (e, parser.error);
+		parser.error = NULL;
+		goto end;
+	}
+
+	if (single_value_only)
+	{
+		// This is really only intended for in-program configuration
+		// and telling the line number would look awkward
+		parser.tokenizer.report_line = false;
+		object = config_parser_parse_value (&parser, err);
+	}
+	else
+		object = config_parser_parse_object (&parser, err);
+	config_parser_expect (&parser, CONFIG_T_ABORT, err);
+end:
+	config_parser_free (&parser);
+	return object;
+}
+
+/// Clone an item.  Schema assignments aren't retained.
+struct config_item *
+config_item_clone (struct config_item *self)
+{
+	// Oh well, it saves code
+	struct str tmp;
+	str_init (&tmp);
+	config_item_write (self, false, &tmp);
+	struct config_item *result =
+		config_item_parse (tmp.str, tmp.len, true, NULL);
+	str_free (&tmp);
+	return result;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static struct config_item *
+config_schema_initialize_item (struct config_schema *schema,
+	struct config_item *parent, struct error **warning, struct error **e)
+{
+	hard_assert (parent->type == CONFIG_ITEM_OBJECT);
+	struct config_item *item =
+		str_map_find (&parent->value.object, schema->name);
+
+	struct error *error = NULL;
+	if (item && config_item_validate_by_schema (item, schema, &error))
+		goto keep_current;
+
+	if (error)
+	{
+		error_set (warning, "resetting configuration item "
+			"`%s' to default: %s", schema->name, error->message);
+		error_free (error);
+		error = NULL;
+	}
+
+	if (schema->default_)
+		item = config_item_parse
+			(schema->default_, strlen (schema->default_), true, &error);
+	else
+		item = config_item_null ();
+
+	if (error || !config_item_validate_by_schema (item, schema, &error))
+	{
+		error_set (e, "invalid default for configuration item `%s': %s",
+			schema->name, error->message);
+		error_free (error);
+
+		config_item_destroy (item);
+		return NULL;
+	}
+
+	// This will free the old item if there was any
+	str_map_set (&parent->value.object, schema->name, item);
+
+keep_current:
+	// Make sure the string subtype fits the schema
+	if (config_item_type_is_string (item->type)
+	 && config_item_type_is_string (schema->type))
+		item->type = schema->type;
+
+	item->schema = schema;
+	return item;
+}
+
+/// Assign schemas and user_data to multiple items at once;
+/// feel free to copy over and modify to suit your particular needs
+static void
+config_schema_apply_to_object (struct config_schema *schema_array,
+	struct config_item *object, void *user_data)
+{
+	while (schema_array->name)
+	{
+		struct error *warning = NULL, *e = NULL;
+		struct config_item *item = config_schema_initialize_item
+			(schema_array++, object, &warning, &e);
+
+		if (warning)
+		{
+			print_warning ("%s", warning->message);
+			error_free (warning);
+		}
+		if (e)
+			print_fatal ("%s", e->message);
+
+		item->user_data = user_data;
+	}
+}
+
+static void
+config_schema_call_changed (struct config_item *item)
+{
+	if (item->type == CONFIG_ITEM_OBJECT)
+	{
+		struct str_map_iter iter;
+		str_map_iter_init (&iter, &item->value.object);
+
+		struct config_item *child;
+		while ((child = str_map_iter_next (&iter)))
+			config_schema_call_changed (child);
+	}
+	else if (item->schema && item->schema->on_change)
+		item->schema->on_change (item);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// XXX: the callbacks may be overdesigned and of little to no practical use
+
+typedef void (*config_module_load_fn)
+	(struct config_item *subtree, void *user_data);
+
+struct config_module
+{
+	char *name;                         ///< Name of the subtree
+	config_module_load_fn loader;       ///< Module config subtree loader
+	void *user_data;                    ///< User data
+};
+
+static void
+config_module_destroy (struct config_module *self)
+{
+	free (self->name);
+	free (self);
+}
+
+struct config
+{
+	struct str_map modules;             ///< Toplevel modules
+	struct config_item *root;           ///< CONFIG_ITEM_OBJECT
+};
+
+static void
+config_init (struct config *self)
+{
+	memset (self, 0, sizeof *self);
+	str_map_init (&self->modules);
+	self->modules.free = (str_map_free_fn) config_module_destroy;
+}
+
+static void
+config_free (struct config *self)
+{
+	str_map_free (&self->modules);
+	if (self->root)
+		config_item_destroy (self->root);
+}
+
+static void
+config_register_module (struct config *self,
+	const char *name, config_module_load_fn loader, void *user_data)
+{
+	struct config_module *module = xcalloc (1, sizeof *module);
+	module->name = xstrdup (name);
+	module->loader = loader;
+	module->user_data = user_data;
+
+	str_map_set (&self->modules, name, module);
+}
+
+static void
+config_load (struct config *self, struct config_item *root)
+{
+	hard_assert (root->type == CONFIG_ITEM_OBJECT);
+	if (self->root)
+		config_item_destroy (self->root);
+	self->root = root;
+
+	struct str_map_iter iter;
+	str_map_iter_init (&iter, &self->modules);
+
+	struct config_module *module;
+	while ((module = str_map_iter_next (&iter)))
+	{
+		struct config_item *subtree = str_map_find
+			(&root->value.object, module->name);
+		// Silently fix inputs that only a lunatic user could create
+		if (!subtree || subtree->type != CONFIG_ITEM_OBJECT)
+		{
+			subtree = config_item_object ();
+			str_map_set (&root->value.object, module->name, subtree);
+		}
+		if (module->loader)
+			module->loader (subtree, module->user_data);
+	}
+}
 
 // --- Protocol modules --------------------------------------------------------
 
