@@ -2946,6 +2946,67 @@ regex_cache_match (struct str_map *cache, const char *regex, int flags,
 	return regexec (re, s, 0, NULL, 0) != REG_NOMATCH;
 }
 
+// --- Simple file I/O ---------------------------------------------------------
+
+static bool
+read_file (const char *filename, struct str *output, struct error **e)
+{
+	FILE *fp = fopen (filename, "rb");
+	if (!fp)
+	{
+		error_set (e, "could not open `%s' for reading: %s",
+			filename, strerror (errno));
+		return false;
+	}
+
+	char buf[BUFSIZ];
+	size_t len;
+
+	while ((len = fread (buf, 1, sizeof buf, fp)) == sizeof buf)
+		str_append_data (output, buf, len);
+	str_append_data (output, buf, len);
+
+	bool success = !ferror (fp);
+	fclose (fp);
+
+	if (success)
+		return true;
+
+	error_set (e, "error while reading `%s': %s",
+		filename, strerror (errno));
+	return false;
+}
+
+/// Overwrites filename contents with data; creates directories as needed
+static bool
+write_file (const char *filename, const struct str *data, struct error **e)
+{
+	char *dir = xstrdup (filename);
+	bool parents_created = mkdir_with_parents (dirname (dir), e);
+	free (dir);
+	if (!parents_created)
+		return false;
+
+	FILE *fp = fopen (filename, "w");
+	if (!fp)
+	{
+		error_set (e, "could not open `%s' for writing: %s",
+			filename, strerror (errno));
+		return false;
+	}
+
+	errno = 0;
+	fwrite (data->str, data->len, 1, fp);
+	fclose (fp);
+
+	if (errno)
+	{
+		error_set (e, "writing to `%s' failed: %s", filename, strerror (errno));
+		return false;
+	}
+	return true;
+}
+
 // --- Simple configuration ----------------------------------------------------
 
 // The keys are stripped of surrounding whitespace, the values are not.
@@ -3023,75 +3084,57 @@ simple_config_update_from_file (struct str_map *config, struct error **e)
 }
 
 static char *
-simple_config_write_default (const char *filename, const char *prolog,
-	const struct simple_config_item *table, struct error **e)
+write_configuration_file (const char *path_hint, const struct str *data,
+	struct error **e)
 {
-	struct str path, base;
-
+	struct str path;
 	str_init (&path);
-	str_init (&base);
 
-	if (filename)
-	{
-		char *tmp = xstrdup (filename);
-		str_append (&path, dirname (tmp));
-		strcpy (tmp, filename);
-		str_append (&base, basename (tmp));
-		free (tmp);
-	}
+	if (path_hint)
+		str_append (&path, path_hint);
 	else
 	{
 		get_xdg_home_dir (&path, "XDG_CONFIG_HOME", ".config");
-		str_append (&path, "/" PROGRAM_NAME);
-		str_append (&base, PROGRAM_NAME ".conf");
+		str_append (&path, "/" PROGRAM_NAME "/" PROGRAM_NAME ".conf");
 	}
 
-	if (!mkdir_with_parents (path.str, e))
-		goto error;
-
-	str_append_c (&path, '/');
-	str_append_str (&path, &base);
-
-	FILE *fp = fopen (path.str, "w");
-	if (!fp)
+	if (!write_file (path.str, data, e))
 	{
-		error_set (e, "could not open `%s' for writing: %s",
-			path.str, strerror (errno));
-		goto error;
+		str_free (&path);
+		return NULL;
 	}
+	return str_steal (&path);
+}
+
+static char *
+simple_config_write_default (const char *path_hint, const char *prolog,
+	const struct simple_config_item *table, struct error **e)
+{
+	struct str data;
+	str_init (&data);
 
 	if (prolog)
-		fputs (prolog, fp);
+		str_append (&data, prolog);
 
-	errno = 0;
 	for (; table->key != NULL; table++)
 	{
-		fprintf (fp, "# %s\n", table->description);
+		str_append_printf (&data, "# %s\n", table->description);
 		if (table->default_value)
-			fprintf (fp, "%s=%s\n", table->key, table->default_value);
+			str_append_printf (&data, "%s=%s\n",
+				table->key, table->default_value);
 		else
-			fprintf (fp, "#%s=\n", table->key);
-	}
-	fclose (fp);
-	if (errno)
-	{
-		error_set (e, "writing to `%s' failed: %s", path.str, strerror (errno));
-		goto error;
+			str_append_printf (&data, "#%s=\n", table->key);
 	}
 
-	str_free (&base);
-	return str_steal (&path);
-
-error:
-	str_free (&base);
-	str_free (&path);
-	return NULL;
+	char *path = write_configuration_file (path_hint, &data, e);
+	str_free (&data);
+	return path;
 }
 
 /// Convenience wrapper suitable for most simple applications
 static void
 call_simple_config_write_default
-	(const char *hint, const struct simple_config_item *table)
+	(const char *path_hint, const struct simple_config_item *table)
 {
 	static const char *prolog =
 	"# " PROGRAM_NAME " " PROGRAM_VERSION " configuration file\n"
@@ -3101,7 +3144,7 @@ call_simple_config_write_default
 	"\n";
 
 	struct error *e = NULL;
-	char *filename = simple_config_write_default (hint, prolog, table, &e);
+	char *filename = simple_config_write_default (path_hint, prolog, table, &e);
 	if (!filename)
 	{
 		print_error ("%s", e->message);
