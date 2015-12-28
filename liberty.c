@@ -977,13 +977,13 @@ str_map_steal (struct str_map *self, const char *key)
 
 struct str_map_iter
 {
-	struct str_map *map;                ///< The map we're iterating
+	const struct str_map *map;          ///< The map we're iterating
 	size_t next_index;                  ///< Next table index to search
 	struct str_map_link *link;          ///< Current link
 };
 
 static void
-str_map_iter_init (struct str_map_iter *self, struct str_map *map)
+str_map_iter_init (struct str_map_iter *self, const struct str_map *map)
 {
 	self->map = map;
 	self->next_index = 0;
@@ -993,7 +993,7 @@ str_map_iter_init (struct str_map_iter *self, struct str_map *map)
 static void *
 str_map_iter_next (struct str_map_iter *self)
 {
-	struct str_map *map = self->map;
+	const struct str_map *map = self->map;
 	if (self->link)
 		self->link = self->link->next;
 	while (!self->link)
@@ -1021,7 +1021,7 @@ static void
 str_map_unset_iter_init (struct str_map_unset_iter *self, struct str_map *map)
 {
 	str_map_iter_init (&self->iter, map);
-	self->iter.map->shrink_lock = true;
+	map->shrink_lock = true;
 	(void) str_map_iter_next (&self->iter);
 	self->next = self->iter.link;
 }
@@ -1039,8 +1039,11 @@ str_map_unset_iter_next (struct str_map_unset_iter *self)
 static void
 str_map_unset_iter_free (struct str_map_unset_iter *self)
 {
-	self->iter.map->shrink_lock = false;
-	str_map_shrink (self->iter.map);
+	// So that we don't have to store another non-const pointer
+	struct str_map *map = (struct str_map *) self->iter.map;
+
+	map->shrink_lock = false;
+	str_map_shrink (map);
 }
 
 // --- Event loop --------------------------------------------------------------
