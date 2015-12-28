@@ -4707,31 +4707,37 @@ config_item_clone (struct config_item *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+/// "user_data" is passed so that it be immediately used by validation callbacks
 static struct config_item *
 config_schema_initialize_item (struct config_schema *schema,
-	struct config_item *parent, struct error **warning, struct error **e)
+	struct config_item *parent, void *user_data, struct error **warning,
+	struct error **e)
 {
 	hard_assert (parent->type == CONFIG_ITEM_OBJECT);
 	struct config_item *item =
 		str_map_find (&parent->value.object, schema->name);
 
-	struct error *error = NULL;
-	if (item && config_item_validate_by_schema (item, schema, &error))
-		goto keep_current;
-
-	if (error)
+	if (item)
 	{
+		struct error *error = NULL;
+		item->user_data = user_data;
+		if (config_item_validate_by_schema (item, schema, &error))
+			goto keep_current;
+
 		error_set (warning, "resetting configuration item "
 			"`%s' to default: %s", schema->name, error->message);
 		error_free (error);
-		error = NULL;
 	}
 
+	struct error *error = NULL;
 	if (schema->default_)
 		item = config_item_parse
 			(schema->default_, strlen (schema->default_), true, &error);
 	else
 		item = config_item_null ();
+
+	if (item)
+		item->user_data = user_data;
 
 	if (error || !config_item_validate_by_schema (item, schema, &error))
 	{
@@ -4765,8 +4771,8 @@ config_schema_apply_to_object (struct config_schema *schema_array,
 	while (schema_array->name)
 	{
 		struct error *warning = NULL, *e = NULL;
-		struct config_item *item = config_schema_initialize_item
-			(schema_array++, object, &warning, &e);
+		config_schema_initialize_item
+			(schema_array++, object, user_data, &warning, &e);
 
 		if (warning)
 		{
@@ -4775,8 +4781,6 @@ config_schema_apply_to_object (struct config_schema *schema_array,
 		}
 		if (e)
 			print_fatal ("%s", e->message);
-
-		item->user_data = user_data;
 	}
 }
 
