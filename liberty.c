@@ -4873,10 +4873,8 @@ config_load (struct config *self, struct config_item *root)
 			(&root->value.object, module->name);
 		// Silently fix inputs that only a lunatic user could create
 		if (!subtree || subtree->type != CONFIG_ITEM_OBJECT)
-		{
-			subtree = config_item_object ();
-			str_map_set (&root->value.object, module->name, subtree);
-		}
+			str_map_set (&root->value.object, module->name,
+				(subtree = config_item_object ()));
 		if (module->loader)
 			module->loader (subtree, module->user_data);
 	}
