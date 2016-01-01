@@ -11,9 +11,11 @@ endif ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUC)
 find_package (PkgConfig REQUIRED)
 pkg_check_modules (libssl REQUIRED libssl libcrypto)
 
-# -lpthread is only there for debugging (gdb & errno)
+set (CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+include (AddThreads)
+
 # -lrt is only for glibc < 2.17
-set (common_libraries ${libssl_LIBRARIES} rt pthread)
+set (common_libraries ${libssl_LIBRARIES} rt)
 include_directories (${libssl_INCLUDE_DIRS})
 link_directories (${libssl_LIBRARY_DIRS})
 
@@ -29,6 +31,7 @@ set (common_sources ${PROJECT_BINARY_DIR}/liberty-config.h)
 enable_testing ()
 foreach (name liberty proto)
 	add_executable (test-${name} tests/${name}.c ${common_sources})
+	add_threads (test-${name})
 	target_link_libraries (test-${name} ${common_libraries})
 	add_test (NAME test-${name} COMMAND test-${name})
 endforeach (name)
