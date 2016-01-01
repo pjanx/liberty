@@ -2219,6 +2219,70 @@ async_getaddrinfo (struct async_manager *manager,
 	return self;
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+typedef void (*async_getnameinfo_fn) (int, char *, char *, void *);
+
+struct async_getnameinfo
+{
+	struct async async;                 ///< Parent object
+
+	int gni_result;                     ///< Direct result from getnameinfo()
+	char host[NI_MAXHOST];              ///< gni() result: host name
+	char service[NI_MAXSERV];           ///< gni() result: service name
+
+	struct sockaddr *address;           ///< gni() argument: address
+	socklen_t address_len;              ///< Size of the address
+	int flags;                          ///< gni() argument: flags
+
+	async_getnameinfo_fn dispatcher;    ///< Event dispatcher
+	void *user_data;                    ///< User data
+};
+
+static void
+async_getnameinfo_execute (struct async *async)
+{
+	struct async_getnameinfo *self = (struct async_getnameinfo *) async;
+	self->gni_result = getnameinfo (self->address, self->address_len,
+		self->host, sizeof self->host,
+		self->service, sizeof self->service, self->flags);
+}
+
+static void
+async_getnameinfo_dispatch (struct async *async)
+{
+	struct async_getnameinfo *self = (struct async_getnameinfo *) async;
+	self->dispatcher (self->gni_result, self->host, self->service,
+		self->user_data);
+}
+
+static void
+async_getnameinfo_destroy (struct async *async)
+{
+	struct async_getnameinfo *self = (struct async_getnameinfo *) async;
+	free (self->address);
+	free (self);
+}
+
+static struct async_getnameinfo *
+async_getnameinfo (struct async_manager *manager,
+	const struct sockaddr *sa, socklen_t sa_len, int flags)
+{
+	struct async_getnameinfo *self = xcalloc (1, sizeof *self);
+	async_init (&self->async, manager);
+
+	self->address = memcpy (xmalloc (sa_len), sa, sa_len);
+	self->address_len = sa_len;
+	self->flags = flags;
+
+	self->async.execute    = async_getnameinfo_execute;
+	self->async.dispatcher = async_getnameinfo_dispatch;
+	self->async.destroy    = async_getnameinfo_destroy;
+
+	async_run (&self->async);
+	return self;
+}
+
 #endif // LIBERTY_WANT_ASYNC
 
 // --- libuv-style write adaptor -----------------------------------------------
