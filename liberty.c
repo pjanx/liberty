@@ -2150,6 +2150,77 @@ poller_common_dispatch (struct poller_common *self)
 
 #endif // LIBERTY_WANT_POLLER
 
+// --- Asynchronous jobs -------------------------------------------------------
+
+#ifdef LIBERTY_WANT_ASYNC
+
+/// The callback takes ownership of the returned list
+typedef void (*async_getaddrinfo_fn) (int, struct addrinfo *, void *);
+
+struct async_getaddrinfo
+{
+	struct async async;                 ///< Parent object
+
+	int gai_result;                     ///< Direct result from getaddrinfo()
+	char *host;                         ///< gai() argument: host
+	char *service;                      ///< gai() argument: service
+	struct addrinfo hints;              ///< gai() argument: hints
+	struct addrinfo *result;            ///< Resulting addresses from gai()
+
+	async_getaddrinfo_fn dispatcher;    ///< Event dispatcher
+	void *user_data;                    ///< User data
+};
+
+static void
+async_getaddrinfo_execute (struct async *async)
+{
+	struct async_getaddrinfo *self = (struct async_getaddrinfo *) async;
+	self->gai_result =
+		getaddrinfo (self->host, self->service, &self->hints, &self->result);
+}
+
+static void
+async_getaddrinfo_dispatch (struct async *async)
+{
+	struct async_getaddrinfo *self = (struct async_getaddrinfo *) async;
+	self->dispatcher (self->gai_result, self->result, self->user_data);
+	self->result = NULL;
+}
+
+static void
+async_getaddrinfo_destroy (struct async *async)
+{
+	struct async_getaddrinfo *self = (struct async_getaddrinfo *) async;
+	free (self->host);
+	free (self->service);
+
+	if (self->result)
+		freeaddrinfo (self->result);
+
+	free (self);
+}
+
+static struct async_getaddrinfo *
+async_getaddrinfo (struct async_manager *manager,
+	const char *host, const char *service, const struct addrinfo *hints)
+{
+	struct async_getaddrinfo *self = xcalloc (1, sizeof *self);
+	async_init (&self->async, manager);
+
+	if (host)     self->host = xstrdup (host);
+	if (service)  self->service = xstrdup (service);
+	if (hints)    memcpy (&self->hints, hints, sizeof *hints);
+
+	self->async.execute    = async_getaddrinfo_execute;
+	self->async.dispatcher = async_getaddrinfo_dispatch;
+	self->async.destroy    = async_getaddrinfo_destroy;
+
+	async_run (&self->async);
+	return self;
+}
+
+#endif // LIBERTY_WANT_ASYNC
+
 // --- libuv-style write adaptor -----------------------------------------------
 
 // Makes it possible to use iovec to write multiple data chunks at once.
