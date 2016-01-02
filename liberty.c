@@ -112,6 +112,9 @@ extern char **environ;
 #define STRINGIFY(x) #x
 #define XSTRINGIFY(x) STRINGIFY (x)
 
+#define CONTAINER_OF(pointer, type, member) \
+	((type *) ((char *) pointer - offsetof (type, member)))
+
 // --- Logging -----------------------------------------------------------------
 
 static void
