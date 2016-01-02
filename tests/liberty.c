@@ -21,6 +21,9 @@
 #define PROGRAM_NAME "test"
 #define PROGRAM_VERSION "0"
 
+#define LIBERTY_WANT_POLLER
+#define LIBERTY_WANT_ASYNC
+
 #include "../liberty.c"
 
 // --- Memory ------------------------------------------------------------------
@@ -368,6 +371,97 @@ test_base64 (void)
 	str_free (&decoded);
 }
 
+// --- Asynchronous jobs -------------------------------------------------------
+
+struct test_async_data
+{
+	struct async_manager manager;       ///< Async manager
+	struct async_getaddrinfo *gai;      ///< Address resolution job
+	struct async_getnameinfo *gni;      ///< Name resolution job
+
+	struct async busyloop;              ///< Busy job for cancellation
+	bool finished;                      ///< End of test indicator
+};
+
+static void
+on_getnameinfo (int err, char *host, char *service, void *user_data)
+{
+	(void) host;
+	(void) service;
+
+	hard_assert (!err);
+	struct test_async_data *data = user_data;
+	data->gni = NULL;
+
+	async_cancel (&data->busyloop);
+}
+
+static void
+on_getaddrinfo (int err, struct addrinfo *results, void *user_data)
+{
+	hard_assert (!err);
+	struct test_async_data *data = user_data;
+	data->gai = NULL;
+
+	data->gni = async_getnameinfo
+		(&data->manager, results->ai_addr, results->ai_addrlen, 0);
+	data->gni->dispatcher = on_getnameinfo;
+	data->gni->user_data = data;
+
+	freeaddrinfo (results);
+}
+
+static void
+on_busyloop_execute (struct async *async)
+{
+	(void) async;
+
+	while (true)
+		sleep (1);
+}
+
+static void
+on_busyloop_destroy (struct async *async)
+{
+	CONTAINER_OF (async, struct test_async_data, busyloop)->finished = true;
+}
+
+static void
+test_async (void)
+{
+	struct test_async_data data;
+	memset (&data, 0, sizeof data);
+	async_manager_init (&data.manager);
+
+	async_init (&data.busyloop, &data.manager);
+	data.busyloop.execute = on_busyloop_execute;
+	data.busyloop.destroy = on_busyloop_destroy;
+	async_run (&data.busyloop);
+
+	struct addrinfo hints;
+	memset (&hints, 0, sizeof hints);
+	hints.ai_socktype = SOCK_STREAM;
+
+	// Localhost should be network-independent and instantaneous
+	data.gai = async_getaddrinfo (&data.manager, "127.0.0.1", "22", &hints);
+	data.gai->dispatcher = on_getaddrinfo;
+	data.gai->user_data = &data;
+
+	struct pollfd pfd =
+		{ .events = POLLIN, .fd = data.manager.finished_pipe[0] };
+
+	// Eventually the busyloop should get cancelled and stop the loop
+	while (!data.finished)
+	{
+		hard_assert (poll (&pfd, 1, 1000) == 1);
+		async_manager_dispatch (&data.manager);
+	}
+
+	soft_assert (!data.gai);
+	soft_assert (!data.gni);
+	async_manager_free (&data.manager);
+}
+
 // --- Main --------------------------------------------------------------------
 
 int
@@ -385,6 +479,7 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/str-map",        NULL, test_str_map);
 	test_add_simple (&test, "/utf-8",          NULL, test_utf8);
 	test_add_simple (&test, "/base64",         NULL, test_base64);
+	test_add_simple (&test, "/async",          NULL, test_async);
 
 	// TODO: write tests for the rest of the library
 
