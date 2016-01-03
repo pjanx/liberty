@@ -1848,10 +1848,10 @@ poller_run (struct poller *self)
 	int n_fds;
 	do
 	{
-		struct timespec ts = poller_timeout_to_timespec
-			(poller_common_get_timeout (&self->common));
+		int timeout = poller_common_get_timeout (&self->common);
+		struct timespec ts = poller_timeout_to_timespec (timeout);
 		n_fds = kevent (self->kqueue_fd,
-			NULL, 0, self->revents, self->len, &ts);
+			NULL, 0, self->revents, self->len, timeout < 0 ? NULL : &ts);
 	}
 	while (n_fds == -1 && errno == EINTR);
 
