@@ -8,16 +8,31 @@ if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUC)
 endif ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUC)
 
 # Dependencies
-find_package (PkgConfig REQUIRED)
-pkg_check_modules (libssl REQUIRED libssl libcrypto)
-
 set (CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 include (AddThreads)
 
-# -lrt is only for glibc < 2.17
-set (common_libraries ${libssl_LIBRARIES} rt)
+find_package (PkgConfig REQUIRED)
+pkg_check_modules (libssl REQUIRED libssl libcrypto)
+
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "BSD")
+	include_directories (/usr/local/include)
+	link_directories (/usr/local/lib)
+	# Our POSIX version macros make these undefined
+	add_definitions (-D__BSD_VISIBLE=1 -D_BSD_SOURCE=1)
+endif ("${CMAKE_SYSTEM_NAME}" MATCHES "BSD")
+
+set (common_libraries ${libssl_LIBRARIES})
 include_directories (${libssl_INCLUDE_DIRS})
 link_directories (${libssl_LIBRARY_DIRS})
+
+# -lrt is only for glibc < 2.17
+# -liconv may or may not be a part of libc
+foreach (extra iconv rt)
+	find_library (extra_lib_${extra} ${extra})
+	if (extra_lib_${extra})
+		list (APPEND common_libraries ${extra})
+	endif (extra_lib_${extra})
+endforeach (extra)
 
 # Generate a configuration file
 # TODO: actualy use the configuration file for something; so far we allow
