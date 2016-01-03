@@ -462,6 +462,162 @@ test_async (void)
 	async_manager_free (&data.manager);
 }
 
+// --- Connector ---------------------------------------------------------------
+
+// This also happens to test a large part of the poller implementation
+
+#include <arpa/inet.h>
+
+struct test_connector_fixture
+{
+	const char *host;                   ///< The host we're listening on
+	int port;                           ///< The port we're listening on
+
+	int listening_fd;                   ///< Listening FD
+
+	struct poller poller;               ///< Poller
+	struct poller_fd listening_event;   ///< Listening event
+	bool quitting;                      ///< Quit signal for the event loop
+};
+
+static void
+test_connector_on_client (const struct pollfd *pfd, void *user_data)
+{
+	(void) user_data;
+
+	int fd = accept (pfd->fd, NULL, NULL);
+	if (fd == -1)
+	{
+		if (errno == EAGAIN
+		 || errno == EINTR
+		 || errno == ECONNABORTED)
+			return;
+
+		exit_fatal ("%s: %s", "accept", strerror (errno));
+	}
+
+	const char message[] = "Hello!\n";
+	(void) write (fd, message, strlen (message));
+	xclose (fd);
+}
+
+static bool
+test_connector_try_bind
+	(struct test_connector_fixture *self, const char *host, int port)
+{
+	struct sockaddr_in sin;
+	sin.sin_family = AF_INET;
+	sin.sin_port = htons ((self->port = port));
+	sin.sin_addr.s_addr = inet_addr ((self->host = host));
+
+	int fd = socket (AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+		return true;
+
+	int yes = 1;
+	(void) setsockopt (fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes);
+
+	if (bind (fd, (struct sockaddr *) &sin, sizeof sin)
+	 || listen (fd, 10))
+	{
+		xclose (fd);
+		return false;
+	}
+
+	self->listening_fd = fd;
+	return true;
+}
+
+static void
+test_connector_fixture_init
+	(const void *user_data, struct test_connector_fixture *self)
+{
+	(void) user_data;
+
+	// Find a free port on localhost in the user range and bind to it
+	for (int i = 0; i < 1024; i++)
+		if (test_connector_try_bind (self, "127.0.0.1", 1024 + i))
+			break;
+	if (!self->listening_fd)
+		exit_fatal ("cannot bind to localhost");
+
+	// Make it so that we immediately accept all connections
+	poller_init (&self->poller);
+	poller_fd_init (&self->listening_event, &self->poller, self->listening_fd);
+	self->listening_event.dispatcher = test_connector_on_client;
+	self->listening_event.user_data = (poller_fd_fn) self;
+	poller_fd_set (&self->listening_event, POLLIN);
+}
+
+static void
+test_connector_fixture_free
+	(const void *user_data, struct test_connector_fixture *self)
+{
+	(void) user_data;
+
+	poller_free (&self->poller);
+	xclose (self->listening_fd);
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static void
+test_connector_on_connected (void *user_data, int socket, const char *hostname)
+{
+	struct test_connector_fixture *self = user_data;
+	hard_assert (!strcmp (hostname, self->host));
+	xclose (socket);
+
+	self->quitting = true;
+}
+
+static void
+test_connector_on_failure (void *user_data)
+{
+	(void) user_data;
+	exit_fatal ("failed to connect to the prepared port");
+}
+
+static void
+test_connector_on_connecting (void *user_data, const char *address)
+{
+	(void) user_data;
+	print_debug ("connecting to %s", address);
+}
+
+static void
+test_connector_on_error (void *user_data, const char *error)
+{
+	(void) user_data;
+	print_debug ("%s: %s", "connecting failed", error);
+}
+
+static void
+test_connector (const void *user_data, struct test_connector_fixture *self)
+{
+	(void) user_data;
+	print_debug ("final target is %s:%d", self->host, self->port);
+
+	struct connector connector;
+	connector_init (&connector, &self->poller);
+	connector.on_connecting = test_connector_on_connecting;
+	connector.on_error      = test_connector_on_error;
+	connector.on_connected  = test_connector_on_connected;
+	connector.on_failure    = test_connector_on_failure;
+	connector.user_data     = self;
+
+	connector_add_target (&connector, ":D", "nonsense");
+
+	char *port = xstrdup_printf ("%d", self->port);
+	connector_add_target (&connector, self->host, port);
+	free (port);
+
+	while (!self->quitting)
+		poller_run (&self->poller);
+
+	connector_free (&connector);
+}
+
 // --- Main --------------------------------------------------------------------
 
 int
@@ -480,6 +636,11 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/utf-8",          NULL, test_utf8);
 	test_add_simple (&test, "/base64",         NULL, test_base64);
 	test_add_simple (&test, "/async",          NULL, test_async);
+
+	test_add (&test, "/connector", struct test_connector_fixture, NULL,
+		test_connector_fixture_init,
+		test_connector,
+		test_connector_fixture_free);
 
 	// TODO: write tests for the rest of the library
 
