@@ -3953,10 +3953,11 @@ connector_target_destroy (struct connector_target *self)
 		async_cancel (self->getaddrinfo_event);
 	if (self->getaddrinfo_error)
 		error_free (self->getaddrinfo_error);
+	if (self->results)
+		freeaddrinfo (self->results);
 
 	free (self->hostname);
 	free (self->service);
-	freeaddrinfo (self->results);
 	free (self);
 }
 
