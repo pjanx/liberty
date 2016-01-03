@@ -104,10 +104,10 @@ test_list (void)
 	}
 
 	// Remove a few entries
-	LIST_UNLINK (list, a[0]); a[0] = NULL;
-	LIST_UNLINK (list, a[3]); a[3] = NULL;
-	LIST_UNLINK (list, a[4]); a[4] = NULL;
-	LIST_UNLINK (list, a[6]); a[6] = NULL;
+	LIST_UNLINK (list, a[0]); free (a[0]); a[0] = NULL;
+	LIST_UNLINK (list, a[3]); free (a[3]); a[3] = NULL;
+	LIST_UNLINK (list, a[4]); free (a[4]); a[4] = NULL;
+	LIST_UNLINK (list, a[6]); free (a[6]); a[6] = NULL;
 
 	// Prepend one more item
 	a[0] = make_link (0);
@@ -136,11 +136,11 @@ test_list_with_tail (void)
 	}
 
 	// Remove a few entries
-	LIST_UNLINK_WITH_TAIL (list, tail, a[0]); a[0] = NULL;
-	LIST_UNLINK_WITH_TAIL (list, tail, a[3]); a[3] = NULL;
-	LIST_UNLINK_WITH_TAIL (list, tail, a[4]); a[4] = NULL;
-	LIST_UNLINK_WITH_TAIL (list, tail, a[6]); a[6] = NULL;
-	LIST_UNLINK_WITH_TAIL (list, tail, a[9]); a[9] = NULL;
+	LIST_UNLINK_WITH_TAIL (list, tail, a[0]); free (a[0]); a[0] = NULL;
+	LIST_UNLINK_WITH_TAIL (list, tail, a[3]); free (a[3]); a[3] = NULL;
+	LIST_UNLINK_WITH_TAIL (list, tail, a[4]); free (a[4]); a[4] = NULL;
+	LIST_UNLINK_WITH_TAIL (list, tail, a[6]); free (a[6]); a[6] = NULL;
+	LIST_UNLINK_WITH_TAIL (list, tail, a[9]); free (a[9]); a[9] = NULL;
 
 	// Append one more item
 	a[9] = make_link (9);
