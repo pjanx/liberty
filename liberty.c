@@ -4421,6 +4421,7 @@ config_item_set_from (struct config_item *self, struct config_item *source,
 		return true;
 	}
 
+	source->user_data = self->user_data;
 	if (!config_item_validate_by_schema (source, schema, e))
 		return false;
 
