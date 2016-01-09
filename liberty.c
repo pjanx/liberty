@@ -4543,6 +4543,9 @@ config_item_write_value (struct config_writer *self, struct config_item *value)
 	}
 }
 
+// FIXME: shuffle code so that this isn't needed (serializer after the parser)
+static bool config_tokenizer_is_word_char (int c);
+
 static void
 config_item_write_kv_pair (struct config_writer *self,
 	const char *key, struct config_item *value)
@@ -4555,7 +4558,21 @@ config_item_write_kv_pair (struct config_writer *self,
 		str_append_printf (self->output,
 			"%s# %s\n", indent, value->schema->comment);
 
-	str_append_printf (self->output, "%s%s = ", indent, key);
+	bool can_use_word = true;
+	for (const char *p = key; *p; p++)
+		if (!config_tokenizer_is_word_char (*p))
+			can_use_word = false;
+
+	str_append (self->output, indent);
+	if (can_use_word)
+		str_append (self->output, key);
+	else
+	{
+		struct str s = { .str = (char *) key, .len = strlen (key) };
+		config_item_write_string (self->output, &s);
+	}
+
+	str_append (self->output, " = ");
 	config_item_write_value (self, value);
 	str_append_c (self->output, '\n');
 }
@@ -5029,7 +5046,10 @@ config_parser_parse_kv_pair (struct config_parser *self,
 	 || PEEK () == CONFIG_T_ABORT)
 		return false;
 
-	EXPECT (CONFIG_T_WORD);
+	// I'm not sure how to feel about arbitrary keys but here they are
+	if (!ACCEPT (CONFIG_T_STRING))
+		EXPECT (CONFIG_T_WORD);
+
 	key = xstrdup (self->tokenizer.string.str);
 	SKIP_NL ();
 
