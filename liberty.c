@@ -3363,7 +3363,8 @@ read_file (const char *filename, struct str *output, struct error **e)
 
 /// Overwrites filename contents with data; creates directories as needed
 static bool
-write_file (const char *filename, const struct str *data, struct error **e)
+write_file (const char *filename, const void *data, size_t data_len,
+	struct error **e)
 {
 	char *dir = xstrdup (filename);
 	bool parents_created = mkdir_with_parents (dirname (dir), e);
@@ -3379,7 +3380,7 @@ write_file (const char *filename, const struct str *data, struct error **e)
 		return false;
 	}
 
-	fwrite (data->str, data->len, 1, fp);
+	fwrite (data, data_len, 1, fp);
 	bool success = !ferror (fp) && !fflush (fp) && !fsync (fileno (fp));
 	fclose (fp);
 
@@ -3394,12 +3395,13 @@ write_file (const char *filename, const struct str *data, struct error **e)
 /// Wrapper for write_file() that makes sure that the new data has been written
 /// to disk in its entirety before overriding the old file
 static bool
-write_file_safe (const char *filename, const struct str *data, struct error **e)
+write_file_safe (const char *filename, const void *data, size_t data_len,
+	struct error **e)
 {
 	// XXX: ideally we would also open the directory, use *at() versions
 	//   of functions and call fsync() on the directory as appropriate
 	char *temp = xstrdup_printf ("%s.new", filename);
-	bool success = write_file (temp, data, e);
+	bool success = write_file (temp, data, data_len, e);
 	if (success && !(success = !rename (temp, filename)))
 		error_set (e, "could not rename `%s' to `%s': %s",
 			temp, filename, strerror (errno));
@@ -3498,7 +3500,7 @@ write_configuration_file (const char *path_hint, const struct str *data,
 		str_append (&path, "/" PROGRAM_NAME "/" PROGRAM_NAME ".conf");
 	}
 
-	if (!write_file_safe (path.str, data, e))
+	if (!write_file_safe (path.str, data->str, data->len, e))
 	{
 		str_free (&path);
 		return NULL;
