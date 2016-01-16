@@ -1180,18 +1180,6 @@ async_run (struct async *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static bool
-async_manager_retry (struct async_manager *self, struct async *async)
-{
-	if (async->cancelled)
-	{
-		if (async->destroy)
-			async->destroy (async);
-		return true;
-	}
-	return async_run (async);
-}
-
 static struct async *
 async_manager_dispatch_fetch (struct async_manager *self)
 {
@@ -1227,7 +1215,12 @@ async_manager_dispatch (struct async_manager *self)
 	LIST_FOR_EACH (struct async, iter, self->delayed)
 	{
 		LIST_UNLINK (self->delayed, iter);
-		if (!async_manager_retry (self, iter))
+		if (iter->cancelled)
+		{
+			if (iter->destroy)
+				iter->destroy (iter);
+		}
+		else if (!async_run (iter))
 			break;
 	}
 }
