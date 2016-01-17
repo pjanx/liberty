@@ -3051,6 +3051,53 @@ format_host_port_pair (const char *host, const char *port)
 
 // --- File system -------------------------------------------------------------
 
+static int
+lock_pid_file (const char *path, struct error **e)
+{
+	// When using XDG_RUNTIME_DIR, the file needs to either have its
+	// access time bumped every 6 hours, or have the sticky bit set
+	int fd = open (path, O_RDWR | O_CREAT,
+		S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH /* 644 */ | S_ISVTX /* sticky */);
+	if (fd < 0)
+	{
+		error_set (e, "can't open `%s': %s", path, strerror (errno));
+		return -1;
+	}
+
+	set_cloexec (fd);
+
+	struct flock lock =
+	{
+		.l_type = F_WRLCK,
+		.l_start = 0,
+		.l_whence = SEEK_SET,
+		.l_len = 0,
+	};
+	if (fcntl (fd, F_SETLK, &lock))
+	{
+		error_set (e, "can't lock `%s': %s", path, strerror (errno));
+		xclose (fd);
+		return -1;
+	}
+
+	struct str pid;
+	str_init (&pid);
+	str_append_printf (&pid, "%ld", (long) getpid ());
+
+	if (ftruncate (fd, 0)
+	 || write (fd, pid.str, pid.len) != (ssize_t) pid.len)
+	{
+		error_set (e, "can't write to `%s': %s", path, strerror (errno));
+		xclose (fd);
+		return -1;
+	}
+	str_free (&pid);
+
+	// Intentionally not closing the file descriptor; it must stay alive
+	// for the entire life of the application
+	return fd;
+}
+
 static bool
 ensure_directory_existence (const char *path, struct error **e)
 {
