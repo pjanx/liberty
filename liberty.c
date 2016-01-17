@@ -2337,18 +2337,16 @@ async_getnameinfo (struct async_manager *manager,
 
 // Makes it possible to use iovec to write multiple data chunks at once.
 
-typedef struct write_req write_req_t;
 struct write_req
 {
-	LIST_HEADER (write_req_t)
+	LIST_HEADER (struct write_req)
 	struct iovec data;                  ///< Data to be written
 };
 
-typedef struct write_queue write_queue_t;
 struct write_queue
 {
-	write_req_t *head;                  ///< The head of the queue
-	write_req_t *tail;                  ///< The tail of the queue
+	struct write_req *head;             ///< The head of the queue
+	struct write_req *tail;             ///< The tail of the queue
 	size_t head_offset;                 ///< Offset into the head
 	size_t len;
 };
@@ -2364,16 +2362,15 @@ write_queue_init (struct write_queue *self)
 static void
 write_queue_free (struct write_queue *self)
 {
-	for (write_req_t *iter = self->head, *next; iter; iter = next)
+	LIST_FOR_EACH (struct write_req, iter, self->head)
 	{
-		next = iter->next;
 		free (iter->data.iov_base);
 		free (iter);
 	}
 }
 
 static void
-write_queue_add (struct write_queue *self, write_req_t *req)
+write_queue_add (struct write_queue *self, struct write_req *req)
 {
 	LIST_APPEND_WITH_TAIL (self->head, self->tail, req);
 	self->len++;
@@ -2385,7 +2382,7 @@ write_queue_processed (struct write_queue *self, size_t len)
 	while (self->head
 		&& self->head_offset + len >= self->head->data.iov_len)
 	{
-		write_req_t *head = self->head;
+		struct write_req *head = self->head;
 		len -= (head->data.iov_len - self->head_offset);
 		self->head_offset = 0;
 
