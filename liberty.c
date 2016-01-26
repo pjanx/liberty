@@ -3472,7 +3472,8 @@ write_file (const char *filename, const void *data, size_t data_len,
 	}
 
 	fwrite (data, data_len, 1, fp);
-	bool success = !ferror (fp) && !fflush (fp) && !fsync (fileno (fp));
+	bool success = !ferror (fp) && !fflush (fp)
+		&& (!fsync (fileno (fp)) || errno == EINVAL);
 	fclose (fp);
 
 	if (!success)
