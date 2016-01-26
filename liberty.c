@@ -2158,7 +2158,9 @@ poller_common_init (struct poller_common *self, struct poller *poller)
 	poller_fd_set (&self->async_event, POLLIN);
 	self->async_event.dispatcher = poller_common_dummy_dispatcher;
 	self->async_event.user_data = self;
-#endif // LIBERTY_WANT_ASYNC
+#else // ! LIBERTY_WANT_ASYNC
+	(void) poller;
+#endif // ! LIBERTY_WANT_ASYNC
 }
 
 static void
