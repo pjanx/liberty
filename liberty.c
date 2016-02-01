@@ -5299,7 +5299,8 @@ config_schema_initialize_item (struct config_schema *schema,
 			schema->name, error->message);
 		error_free (error);
 
-		config_item_destroy (item);
+		if (item)
+			config_item_destroy (item);
 		return NULL;
 	}
 
@@ -5334,7 +5335,7 @@ config_schema_apply_to_object (struct config_schema *schema_array,
 			error_free (warning);
 		}
 		if (e)
-			print_fatal ("%s", e->message);
+			exit_fatal ("%s", e->message);
 	}
 }
 
