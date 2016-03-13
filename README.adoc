@@ -15,7 +15,13 @@ The API is intentionally unstable, which allows for easy refactoring.
 
 All development is done on Linux, but other POSIX-compatible operating systems
 should be supported as well.  They have an extremely low priority, however, and
-I'm not testing them at all.
+I'm not testing them at all, with the exception of OpenBSD.
+
+Contributing and Support
+------------------------
+Use this project's GitHub to report any bugs, request features, or submit pull
+requests.  If you want to discuss this project, or maybe just hang out with
+the developer, feel free to join me at irc://irc.janouch.name, channel #dev.
 
 License
 -------
