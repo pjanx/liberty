@@ -1612,6 +1612,8 @@ poller_set (struct poller *self, struct poller_fd *fd)
 		modifying ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, fd->fd, &event) != -1);
 }
 
+#define poller_post_fork(self)
+
 static int
 poller_compare_fds (const void *ax, const void *bx)
 {
@@ -1763,12 +1765,10 @@ static void
 poller_set (struct poller *self, struct poller_fd *fd)
 {
 	hard_assert (fd->poller == self);
-	bool modifying = true;
 	if (fd->index == -1)
 	{
 		poller_ensure_space (self);
 		self->fds[fd->index = self->len++] = fd;
-		modifying = false;
 	}
 
 	// We have to watch for readability and writeability separately;
@@ -1782,6 +1782,18 @@ poller_set (struct poller *self, struct poller_fd *fd)
 	if (kevent (self->kqueue_fd,
 		changes, N_ELEMENTS (changes), NULL, 0, NULL) == -1)
 		exit_fatal ("%s: %s", "kevent", strerror (errno));
+}
+
+static void
+poller_post_fork (struct poller *self)
+{
+	// The kqueue FD isn't preserved across forks, need to recreate it
+	self->kqueue_fd = kqueue ();
+	hard_assert (self->kqueue_fd != -1);
+	set_cloexec (self->kqueue_fd);
+
+	for (size_t i = 0; i < self->len; i++)
+		poller_set (self, self->fds[i]);
 }
 
 static int
@@ -1986,6 +1998,8 @@ poller_set (struct poller *self, struct poller_fd *fd)
 	new_entry->fd = fd->fd;
 	new_entry->events = fd->events;
 }
+
+#define poller_post_fork(self)
 
 static void
 poller_remove_at_index (struct poller *self, size_t index)
