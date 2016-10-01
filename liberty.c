@@ -4313,6 +4313,77 @@ connector_add_target (struct connector *self,
 
 #endif // defined LIBERTY_WANT_POLLER && defined LIBERTY_WANT_ASYNC
 
+// --- Simple network I/O ------------------------------------------------------
+
+enum socket_io_result
+{
+	SOCKET_IO_OK = 0,                   ///< Completed successfully
+	SOCKET_IO_EOF,                      ///< Connection shut down by peer
+	SOCKET_IO_ERROR                     ///< Connection error
+};
+
+static enum socket_io_result
+socket_io_try_read (int socket_fd, struct str *rb)
+{
+	// Flood protection, cannot afford to read too much at once
+	size_t read_limit = rb->len + (1 << 20);
+	if (read_limit < rb->len)
+		read_limit = SIZE_MAX;
+
+	ssize_t n_read;
+	while (rb->len < read_limit)
+	{
+		str_ensure_space (rb, 1024);
+		n_read = recv (socket_fd, rb->str + rb->len,
+			rb->alloc - rb->len - 1 /* null byte */, 0);
+
+		if (n_read > 0)
+		{
+			rb->str[rb->len += n_read] = '\0';
+			continue;
+		}
+		if (n_read == 0)
+			return SOCKET_IO_EOF;
+
+		if (errno == EAGAIN)
+			return SOCKET_IO_OK;
+		if (errno == EINTR)
+			continue;
+
+		int errno_save = errno;
+		LOG_LIBC_FAILURE ("recv");
+		errno = errno_save;
+		return SOCKET_IO_ERROR;
+	}
+	return SOCKET_IO_OK;
+}
+
+static enum socket_io_result
+socket_io_try_write (int socket_fd, struct str *wb)
+{
+	ssize_t n_written;
+	while (wb->len)
+	{
+		n_written = send (socket_fd, wb->str, wb->len, 0);
+		if (n_written >= 0)
+		{
+			str_remove_slice (wb, 0, n_written);
+			continue;
+		}
+
+		if (errno == EAGAIN)
+			return SOCKET_IO_OK;
+		if (errno == EINTR)
+			continue;
+
+		int errno_save = errno;
+		LOG_LIBC_FAILURE ("send");
+		errno = errno_save;
+		return SOCKET_IO_ERROR;
+	}
+	return SOCKET_IO_OK;
+}
+
 // --- Advanced configuration --------------------------------------------------
 
 // This is a more powerful configuration format, adding key-value maps and
