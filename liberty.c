@@ -3187,29 +3187,21 @@ static char *
 resolve_relative_filename_generic
 	(struct str_vector *paths, const char *tail, const char *filename)
 {
-	struct str file;
-	str_init (&file);
-
-	char *result = NULL;
 	for (unsigned i = 0; i < paths->len; i++)
 	{
 		// As per XDG spec, relative paths are ignored
 		if (*paths->vector[i] != '/')
 			continue;
 
-		str_reset (&file);
-		str_append_printf (&file, "%s/%s%s", paths->vector[i], tail, filename);
+		char *file = xstrdup_printf
+			("%s/%s%s", paths->vector[i], tail, filename);
 
 		struct stat st;
-		if (!stat (file.str, &st))
-		{
-			result = str_steal (&file);
-			break;
-		}
+		if (!stat (file, &st))
+			return file;
+		free (file);
 	}
-
-	str_free (&file);
-	return result;
+	return NULL;
 }
 
 static void
