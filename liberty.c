@@ -5336,6 +5336,27 @@ config_item_clone (struct config_item *self)
 	return result;
 }
 
+static struct config_item *
+config_read_from_file (const char *filename, struct error **e)
+{
+	struct config_item *root = NULL;
+
+	struct str data;
+	str_init (&data);
+	if (!read_file (filename, &data, e))
+		goto end;
+
+	struct error *error = NULL;
+	if (!(root = config_item_parse (data.str, data.len, false, &error)))
+	{
+		error_set (e, "parse error in `%s': %s", filename, error->message);
+		error_free (error);
+	}
+end:
+	str_free (&data);
+	return root;
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 /// "user_data" is passed so that it be immediately used by validation callbacks
