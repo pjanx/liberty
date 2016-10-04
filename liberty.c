@@ -83,7 +83,10 @@
 
 extern char **environ;
 
-#ifdef _POSIX_MONOTONIC_CLOCK
+#ifdef CLOCK_MONOTONIC_RAW
+// This should be more accurate for shorter intervals
+#define CLOCK_BEST CLOCK_MONOTONIC_RAW
+#elif defined _POSIX_MONOTONIC_CLOCK
 #define CLOCK_BEST CLOCK_MONOTONIC
 #else // ! _POSIX_MONOTIC_CLOCK
 #define CLOCK_BEST CLOCK_REALTIME
