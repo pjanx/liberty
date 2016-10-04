@@ -5362,7 +5362,7 @@ end:
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-/// "user_data" is passed so that it be immediately used by validation callbacks
+/// "user_data" is passed to allow its immediate use in validation callbacks
 static struct config_item *
 config_schema_initialize_item (struct config_schema *schema,
 	struct config_item *parent, void *user_data, struct error **warning,
