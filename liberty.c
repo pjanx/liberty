@@ -827,7 +827,7 @@ str_map_free (struct str_map *self)
 }
 
 static uint64_t
-str_map_pos (struct str_map *self, const char *s)
+str_map_pos (const struct str_map *self, const char *s)
 {
 	size_t mask = self->alloc - 1;
 	return siphash_wrapper (s, strlen (s)) & mask;
@@ -943,7 +943,7 @@ str_map_set (struct str_map *self, const char *key, void *value)
 }
 
 static void *
-str_map_find_real (struct str_map *self, const char *key)
+str_map_find_real (const struct str_map *self, const char *key)
 {
 	struct str_map_link *iter = self->map[str_map_pos (self, key)];
 	for (; iter; iter = iter->next)
@@ -953,7 +953,7 @@ str_map_find_real (struct str_map *self, const char *key)
 }
 
 static void *
-str_map_find (struct str_map *self, const char *key)
+str_map_find (const struct str_map *self, const char *key)
 {
 	if (!self->key_xfrm)
 		return str_map_find_real (self, key);
