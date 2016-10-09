@@ -409,7 +409,8 @@ http_parse_media_type_parameter
 	{
 	case HTTP_T_TOKEN:
 	case HTTP_T_QUOTED_STRING:
-		str_map_set (parameters, attribute, xstrdup (t->string.str));
+		if (parameters)
+			str_map_set (parameters, attribute, xstrdup (t->string.str));
 		result = true;
 	default:
 		break;
@@ -420,8 +421,9 @@ end:
 	return result;
 }
 
-/// Parser for "Content-Type".  @a type and @a subtype may be non-NULL
-/// even if the function fails.  @a parameters should be case-insensitive.
+/// Parser for "Content-Type".  @a type and @a subtype may end up non-NULL
+/// even if the function fails.  @a parameters should be case-insensitive,
+/// and may be NULL for validation only.
 static bool
 http_parse_media_type (const char *media_type,
 	char **type, char **subtype, struct str_map *parameters)
