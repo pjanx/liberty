@@ -66,7 +66,7 @@ irc_parse_message_tags (const char *tags, struct str_map *out)
 {
 	struct str_vector v;
 	str_vector_init (&v);
-	cstr_split_ignore_empty (tags, ';', &v);
+	cstr_split (tags, ";", true, &v);
 
 	for (size_t i = 0; i < v.len; i++)
 	{

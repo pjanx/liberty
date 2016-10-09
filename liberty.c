@@ -2899,30 +2899,17 @@ base64_encode (const void *data, size_t len, struct str *output)
 // --- Utilities ---------------------------------------------------------------
 
 static void
-cstr_split (const char *s, const char *delimiters, struct str_vector *out)
+cstr_split (const char *s, const char *delimiters, bool ignore_empty,
+	struct str_vector *out)
 {
 	const char *begin = s, *end;
 	while ((end = strpbrk (begin, delimiters)))
 	{
-		str_vector_add_owned (out, xstrndup (begin, end - begin));
-		begin = ++end;
-	}
-	str_vector_add (out, begin);
-}
-
-static void
-cstr_split_ignore_empty (const char *s, char delimiter, struct str_vector *out)
-{
-	const char *begin = s, *end;
-
-	while ((end = strchr (begin, delimiter)))
-	{
-		if (begin != end)
+		if (!ignore_empty || begin != end)
 			str_vector_add_owned (out, xstrndup (begin, end - begin));
 		begin = ++end;
 	}
-
-	if (*begin)
+	if (!ignore_empty || *begin)
 		str_vector_add (out, begin);
 }
 
@@ -3219,7 +3206,7 @@ get_xdg_config_dirs (struct str_vector *out)
 	const char *xdg_config_dirs;
 	if (!(xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
 		xdg_config_dirs = "/etc/xdg";
-	cstr_split_ignore_empty (xdg_config_dirs, ':', out);
+	cstr_split (xdg_config_dirs, ":", true, out);
 }
 
 static char *
@@ -3246,7 +3233,7 @@ get_xdg_data_dirs (struct str_vector *out)
 	const char *xdg_data_dirs;
 	if (!(xdg_data_dirs = getenv ("XDG_DATA_DIRS")))
 		xdg_data_dirs = "/usr/local/share/:/usr/share/";
-	cstr_split_ignore_empty (xdg_data_dirs, ':', out);
+	cstr_split (xdg_data_dirs, ":", true, out);
 }
 
 static char *
@@ -4635,7 +4622,7 @@ config_item_get (struct config_item *self, const char *path, struct error **e)
 
 	struct str_vector v;
 	str_vector_init (&v);
-	cstr_split (path, ".", &v);
+	cstr_split (path, ".", false, &v);
 
 	struct config_item *result = NULL;
 	size_t i = 0;
