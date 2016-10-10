@@ -647,10 +647,7 @@ scgi_parser_push (struct scgi_parser *self,
 	if (!len)
 	{
 		if (self->state != SCGI_READING_CONTENT)
-		{
-			error_set (e, "premature EOF");
-			return false;
-		}
+			return error_set (e, "premature EOF");
 
 		// Indicate end of file
 		return self->on_content (self->user_data, NULL, 0);
@@ -678,17 +675,12 @@ scgi_parser_push (struct scgi_parser *self,
 		}
 
 		if (digit < '0' || digit >= '9')
-		{
-			error_set (e, "invalid header netstring");
-			return false;
-		}
+			return error_set (e, "invalid header netstring");
 
 		size_t new_len = self->headers_len * 10 + (digit - '0');
 		if (new_len < self->headers_len)
-		{
-			error_set (e, "header netstring is too long");
-			return false;
-		}
+			return error_set (e, "header netstring is too long");
+
 		self->headers_len = new_len;
 		str_remove_slice (&self->input, 0, 1);
 		break;
@@ -704,10 +696,8 @@ scgi_parser_push (struct scgi_parser *self,
 			// The netstring is ending but we haven't finished parsing it,
 			// or the netstring doesn't end with a comma
 			if (self->name.len || c != ',')
-			{
-				error_set (e, "invalid header netstring");
-				return false;
-			}
+				return error_set (e, "invalid header netstring");
+
 			self->state = SCGI_READING_CONTENT;
 			keep_running = self->on_headers_read (self->user_data);
 		}
@@ -728,8 +718,7 @@ scgi_parser_push (struct scgi_parser *self,
 		if (!self->headers_len)
 		{
 			// The netstring is ending but we haven't finished parsing it
-			error_set (e, "invalid header netstring");
-			return false;
+			return error_set (e, "invalid header netstring");
 		}
 		else if (c != '\0')
 			str_append_c (&self->value, c);

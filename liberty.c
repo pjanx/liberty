@@ -633,14 +633,14 @@ struct error
 	char *message;                      ///< Textual description of the event
 };
 
-static void
+static bool
 error_set (struct error **e, const char *message, ...) ATTRIBUTE_PRINTF (2, 3);
 
-static void
+static bool
 error_set (struct error **e, const char *message, ...)
 {
 	if (!e)
-		return;
+		return false;
 
 	va_list ap;
 	va_start (ap, message);
@@ -660,6 +660,7 @@ error_set (struct error **e, const char *message, ...)
 
 	soft_assert (*e == NULL);
 	*e = tmp;
+	return false;
 }
 
 static void
@@ -725,10 +726,7 @@ random_bytes (void *output, size_t len, struct error **e)
 	ssize_t got = 0;
 
 	if (fd < 0)
-	{
-		error_set (e, "%s: %s", "open", strerror (errno));
-		return false;
-	}
+		return error_set (e, "%s: %s", "open", strerror (errno));
 	else if ((got = read (fd, output, len)) < 0)
 		error_set (e, "%s: %s", "read", strerror (errno));
 	else if (got != (ssize_t) len)
@@ -3113,16 +3111,14 @@ ensure_directory_existence (const char *path, struct error **e)
 	{
 		if (mkdir (path, S_IRWXU | S_IRWXG | S_IRWXO))
 		{
-			error_set (e, "cannot create directory `%s': %s",
+			return error_set (e, "cannot create directory `%s': %s",
 				path, strerror (errno));
-			return false;
 		}
 	}
 	else if (!S_ISDIR (st.st_mode))
 	{
-		error_set (e, "cannot create directory `%s': %s",
+		return error_set (e, "cannot create directory `%s': %s",
 			path, "file exists but is not a directory");
-		return false;
 	}
 	return true;
 }
@@ -3425,9 +3421,8 @@ read_file (const char *filename, struct str *output, struct error **e)
 	FILE *fp = fopen (filename, "rb");
 	if (!fp)
 	{
-		error_set (e, "could not open `%s' for reading: %s",
+		return error_set (e, "could not open `%s' for reading: %s",
 			filename, strerror (errno));
-		return false;
 	}
 
 	char buf[BUFSIZ];
@@ -3443,9 +3438,8 @@ read_file (const char *filename, struct str *output, struct error **e)
 	if (success)
 		return true;
 
-	error_set (e, "error while reading `%s': %s",
+	return error_set (e, "error while reading `%s': %s",
 		filename, strerror (errno));
-	return false;
 }
 
 /// Overwrites filename contents with data; creates directories as needed
@@ -3462,9 +3456,8 @@ write_file (const char *filename, const void *data, size_t data_len,
 	FILE *fp = fopen (filename, "w");
 	if (!fp)
 	{
-		error_set (e, "could not open `%s' for writing: %s",
+		return error_set (e, "could not open `%s' for writing: %s",
 			filename, strerror (errno));
-		return false;
 	}
 
 	fwrite (data, data_len, 1, fp);
@@ -3474,8 +3467,8 @@ write_file (const char *filename, const void *data, size_t data_len,
 
 	if (!success)
 	{
-		error_set (e, "writing to `%s' failed: %s", filename, strerror (errno));
-		return false;
+		return error_set (e, "writing to `%s' failed: %s",
+			filename, strerror (errno));
 	}
 	return true;
 }
