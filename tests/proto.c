@@ -22,12 +22,16 @@
 #define PROGRAM_VERSION "0"
 
 #define LIBERTY_WANT_SSL
+// The MPD client is a full wrapper and needs the network
+#define LIBERTY_WANT_POLLER
+#define LIBERTY_WANT_ASYNC
 
 #define LIBERTY_WANT_PROTO_IRC
 #define LIBERTY_WANT_PROTO_HTTP
 #define LIBERTY_WANT_PROTO_SCGI
 #define LIBERTY_WANT_PROTO_FASTCGI
 #define LIBERTY_WANT_PROTO_WS
+#define LIBERTY_WANT_PROTO_MPD
 
 #include "../liberty.c"
 
@@ -201,7 +205,7 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/http-parser",    NULL, test_http_parser);
 	test_add_simple (&test, "/scgi-parser",    NULL, test_scgi_parser);
 	test_add_simple (&test, "/websockets",     NULL, test_websockets);
-	// TODO: test FastCGI
+	// TODO: test FastCGI and MPD
 
 	return test_run (&test);
 }
