@@ -1498,9 +1498,6 @@ mpd_client_parse_response (const char *p, struct mpd_response *response)
 {
 	if (!strcmp (p, "OK"))
 		return response->success = true;
-	if (!strcmp (p, "list_OK"))
-		// TODO: either implement this or fail the connection properly
-		hard_assert (!"command_list_ok_begin not implemented");
 
 	char *end = NULL;
 	if (*p++ != 'A' || *p++ != 'C' || *p++ != 'K' || *p++ != ' ' || *p++ != '[')
@@ -1574,7 +1571,9 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 
 	struct mpd_response response;
 	memset (&response, 0, sizeof response);
-	if (mpd_client_parse_response (line, &response))
+	if (!strcmp (line, "list_OK"))
+		str_vector_add_owned (&self->data, NULL);
+	else if (mpd_client_parse_response (line, &response))
 	{
 		mpd_client_dispatch (self, &response);
 		free (response.current_command);
@@ -1756,6 +1755,15 @@ mpd_client_list_begin (struct mpd_client *self)
 {
 	hard_assert (!self->in_list);
 	mpd_client_send_command (self, "command_list_begin", NULL);
+	self->in_list = true;
+}
+
+/// Beware that "list_OK" turns into NULL values in the output vector
+static void
+mpd_client_list_ok_begin (struct mpd_client *self)
+{
+	hard_assert (!self->in_list);
+	mpd_client_send_command (self, "command_list_ok_begin", NULL);
 	self->in_list = true;
 }
 
