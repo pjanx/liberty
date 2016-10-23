@@ -832,7 +832,7 @@ str_map_pos (const struct str_map *self, const char *s)
 }
 
 static uint64_t
-str_map_link_hash (struct str_map_link *self)
+str_map_link_hash (const struct str_map_link *self)
 {
 	return siphash_wrapper (self->key, self->key_length);
 }
@@ -1458,7 +1458,7 @@ poller_timers_set (struct poller_timers *self, struct poller_timer *timer)
 }
 
 static int
-poller_timers_get_poll_timeout (struct poller_timers *self)
+poller_timers_get_poll_timeout (const struct poller_timers *self)
 {
 	if (!self->len)
 		return -1;
@@ -1474,9 +1474,9 @@ poller_timers_get_poll_timeout (struct poller_timers *self)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
-poller_idle_dispatch (struct poller_idle *list)
+poller_idle_dispatch (const struct poller_idle *list)
 {
-	struct poller_idle *iter, *next;
+	const struct poller_idle *iter, *next;
 	for (iter = list; iter; iter = next)
 	{
 		next = iter->next;
@@ -1498,7 +1498,7 @@ struct poller_common
 
 static void poller_common_init (struct poller_common *, struct poller *);
 static void poller_common_free (struct poller_common *);
-static int poller_common_get_timeout (struct poller_common *);
+static int poller_common_get_timeout (const struct poller_common *);
 static void poller_common_dispatch (struct poller_common *);
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -2082,7 +2082,7 @@ poller_timer_set (struct poller_timer *self, int timeout_ms)
 }
 
 static bool
-poller_timer_is_active (struct poller_timer *self)
+poller_timer_is_active (const struct poller_timer *self)
 {
 	return self->index != -1;
 }
@@ -2188,7 +2188,7 @@ poller_common_free (struct poller_common *self)
 }
 
 static int
-poller_common_get_timeout (struct poller_common *self)
+poller_common_get_timeout (const struct poller_common *self)
 {
 	if (self->idle)
 		return 0;
@@ -3738,7 +3738,7 @@ opt_handler_init (struct opt_handler *self, int argc, char **argv,
 }
 
 static void
-opt_handler_usage (struct opt_handler *self, FILE *stream)
+opt_handler_usage (const struct opt_handler *self, FILE *stream)
 {
 	struct str usage;
 	str_init (&usage);
@@ -3781,7 +3781,7 @@ opt_handler_usage (struct opt_handler *self, FILE *stream)
 }
 
 static int
-opt_handler_get (struct opt_handler *self)
+opt_handler_get (const struct opt_handler *self)
 {
 	return getopt_long (self->argc, self->argv,
 		self->opt_string, self->options, NULL);
