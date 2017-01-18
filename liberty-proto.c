@@ -1925,7 +1925,11 @@ mpd_client_connect_unix (struct mpd_client *self, const char *address,
 	free (expanded);
 
 	if (connect (fd, (struct sockaddr *) &sun, sizeof sun))
-		return error_set (e, "%s: %s", "connect", strerror (errno));
+	{
+		error_set (e, "%s: %s", "connect", strerror (errno));
+		xclose (fd);
+		return false;
+	}
 
 	mpd_client_finish_connection (self, fd);
 	return true;
