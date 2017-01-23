@@ -305,17 +305,17 @@ xstrndup (const char *s, size_t n)
 
 // The most basic helper macros to make working with arrays not suck
 
-#define ARRAY(type, name) type *name; size_t name ## _len, name ## _size;
+#define ARRAY(type, name) type *name; size_t name ## _len, name ## _alloc;
 #define ARRAY_INIT_SIZED(a, n)                                                 \
 	BLOCK_START                                                                \
-		(a) = xcalloc (sizeof *(a), (a ## _size) = (n));                       \
+		(a) = xcalloc (sizeof *(a), (a ## _alloc) = (n));                      \
 		(a ## _len) = 0;                                                       \
 	BLOCK_END
 #define ARRAY_INIT(a) ARRAY_INIT_SIZED (a, 16)
 #define ARRAY_RESERVE(a, n)                                                    \
 	BLOCK_START                                                                \
-		while ((a ## _size) - (a ## _len) < n)                                 \
-			(a) = xreallocarray ((a), sizeof *(a), (a ## _size) <<= 1);        \
+		while ((a ## _alloc) - (a ## _len) < n)                                \
+			(a) = xreallocarray ((a), sizeof *(a), (a ## _alloc) <<= 1);       \
 	BLOCK_END
 
 // --- Double-linked list helpers ----------------------------------------------

@@ -194,9 +194,7 @@ row_buffer_space (struct row_buffer *self, int width, chtype attrs)
 	if (width < 0)
 		return;
 
-	while (self->chars_len + width >= self->chars_alloc)
-		self->chars = xreallocarray (self->chars,
-			sizeof *self->chars, (self->chars_alloc <<= 1));
+	ARRAY_RESERVE (self->chars, (size_t) width);
 
 	struct row_char space = { .attrs = attrs, .c = ' ', .width = 1 };
 	self->total_width += width;
