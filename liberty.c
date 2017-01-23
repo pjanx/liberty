@@ -2957,7 +2957,7 @@ cstr_cut_until (const char *s, const char *alphabet)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static char *
-join_strv (const struct strv *v, char delimiter)
+strv_join (const struct strv *v, const char *delimiter)
 {
 	if (!v->len)
 		return xstrdup ("");
@@ -2966,7 +2966,7 @@ join_strv (const struct strv *v, char delimiter)
 	str_init (&result);
 	str_append (&result, v->vector[0]);
 	for (size_t i = 1; i < v->len; i++)
-		str_append_printf (&result, "%c%s", delimiter, v->vector[i]);
+		str_append_printf (&result, "%s%s", delimiter, v->vector[i]);
 	return str_steal (&result);
 }
 
