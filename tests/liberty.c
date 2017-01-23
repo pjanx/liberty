@@ -199,7 +199,7 @@ test_str (void)
 
 	struct str s;
 	str_init (&s);
-	str_ensure_space (&s, MEGA);
+	str_reserve (&s, MEGA);
 	str_append_data (&s, x, sizeof x);
 	str_remove_slice (&s, 4, 4);
 	soft_assert (s.len == 4);

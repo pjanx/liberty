@@ -516,7 +516,7 @@ str_steal (struct str *self)
 }
 
 static void
-str_ensure_space (struct str *self, size_t n)
+str_reserve (struct str *self, size_t n)
 {
 	// We allocate at least one more byte for the terminating null character
 	size_t new_alloc = self->alloc;
@@ -529,7 +529,7 @@ str_ensure_space (struct str *self, size_t n)
 static void
 str_append_data (struct str *self, const void *data, size_t n)
 {
-	str_ensure_space (self, n);
+	str_reserve (self, n);
 	memcpy (self->str + self->len, data, n);
 	self->len += n;
 	self->str[self->len] = '\0';
@@ -567,7 +567,7 @@ str_append_vprintf (struct str *self, const char *fmt, va_list va)
 		return -1;
 
 	va_copy (ap, va);
-	str_ensure_space (self, size);
+	str_reserve (self, size);
 	size = vsnprintf (self->str + self->len, self->alloc - self->len, fmt, ap);
 	va_end (ap);
 
@@ -4333,7 +4333,7 @@ socket_io_try_read (int socket_fd, struct str *rb)
 	ssize_t n_read;
 	while (rb->len < read_limit)
 	{
-		str_ensure_space (rb, 1024);
+		str_reserve (rb, 1024);
 		n_read = recv (socket_fd, rb->str + rb->len,
 			rb->alloc - rb->len - 1 /* null byte */, 0);
 
