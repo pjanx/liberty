@@ -157,31 +157,31 @@ test_list_with_tail (void)
 // --- Strings -----------------------------------------------------------------
 
 static void
-test_str_vector (void)
+test_strv (void)
 {
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 
-	str_vector_add_owned (&v, xstrdup ("xkcd"));
-	str_vector_reset (&v);
+	strv_add_owned (&v, xstrdup ("xkcd"));
+	strv_reset (&v);
 
 	const char *a[] =
 		{ "123", "456", "a", "bc", "def", "ghij", "klmno", "pqrstu" };
 
 	// Add the first two items via another vector
-	struct str_vector w;
-	str_vector_init (&w);
-	str_vector_add_args (&w, a[0], a[1], NULL);
-	str_vector_add_vector (&v, w.vector);
-	str_vector_free (&w);
+	struct strv w;
+	strv_init (&w);
+	strv_add_args (&w, a[0], a[1], NULL);
+	strv_add_vector (&v, w.vector);
+	strv_free (&w);
 
 	// Add an item and delete it right after
-	str_vector_add (&v, "test");
-	str_vector_remove (&v, v.len - 1);
+	strv_add (&v, "test");
+	strv_remove (&v, v.len - 1);
 
 	// Add the rest of the list properly
 	for (int i = 2; i < (int) N_ELEMENTS (a); i++)
-		str_vector_add (&v, a[i]);
+		strv_add (&v, a[i]);
 
 	// Check the contents
 	soft_assert (v.len == N_ELEMENTS (a));
@@ -189,7 +189,7 @@ test_str_vector (void)
 		soft_assert (!strcmp (v.vector[i], a[i]));
 	soft_assert (v.vector[v.len] == NULL);
 
-	str_vector_free (&v);
+	strv_free (&v);
 }
 
 static void
@@ -629,7 +629,7 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/memory",         NULL, test_memory);
 	test_add_simple (&test, "/list",           NULL, test_list);
 	test_add_simple (&test, "/list-with-tail", NULL, test_list_with_tail);
-	test_add_simple (&test, "/str-vector",     NULL, test_str_vector);
+	test_add_simple (&test, "/strv",           NULL, test_strv);
 	test_add_simple (&test, "/str",            NULL, test_str);
 	test_add_simple (&test, "/error",          NULL, test_error);
 	test_add_simple (&test, "/str-map",        NULL, test_str_map);

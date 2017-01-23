@@ -62,8 +62,8 @@ struct attrs
 static struct attrs
 attrs_decode (const char *value)
 {
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 	cstr_split (value, " ", true, &v);
 
 	int colors = 0;
@@ -87,7 +87,7 @@ attrs_decode (const char *value)
 		else if (!strcmp (*it, "italic"))  attrs.attrs |= A_ITALIC;
 #endif  // A_ITALIC
 	}
-	str_vector_free (&v);
+	strv_free (&v);
 	return attrs;
 }
 

@@ -29,7 +29,7 @@ struct irc_message
 	struct str_map tags;                ///< IRC 3.2 message tags
 	char *prefix;                       ///< Message prefix
 	char *command;                      ///< IRC command
-	struct str_vector params;           ///< Command parameters
+	struct strv params;                 ///< Command parameters
 };
 
 static char *
@@ -64,8 +64,8 @@ irc_unescape_message_tag (const char *value)
 static void
 irc_parse_message_tags (const char *tags, struct str_map *out)
 {
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 	cstr_split (tags, ";", true, &v);
 
 	for (size_t i = 0; i < v.len; i++)
@@ -80,7 +80,7 @@ irc_parse_message_tags (const char *tags, struct str_map *out)
 			str_map_set (out, key, xstrdup (""));
 	}
 
-	str_vector_free (&v);
+	strv_free (&v);
 }
 
 static void
@@ -91,7 +91,7 @@ irc_parse_message (struct irc_message *msg, const char *line)
 
 	msg->prefix = NULL;
 	msg->command = NULL;
-	str_vector_init (&msg->params);
+	strv_init (&msg->params);
 
 	// IRC 3.2 message tags
 	if (*line == '@')
@@ -132,7 +132,7 @@ irc_parse_message (struct irc_message *msg, const char *line)
 
 		if (*line == ':')
 		{
-			str_vector_add (&msg->params, ++line);
+			strv_add (&msg->params, ++line);
 			break;
 		}
 
@@ -140,7 +140,7 @@ irc_parse_message (struct irc_message *msg, const char *line)
 		if (!param_len)
 			break;
 
-		str_vector_add_owned (&msg->params, xstrndup (line, param_len));
+		strv_add_owned (&msg->params, xstrndup (line, param_len));
 		line += param_len;
 	}
 }
@@ -151,7 +151,7 @@ irc_free_message (struct irc_message *msg)
 	str_map_free (&msg->tags);
 	free (msg->prefix);
 	free (msg->command);
-	str_vector_free (&msg->params);
+	strv_free (&msg->params);
 }
 
 static void
@@ -1360,7 +1360,7 @@ struct mpd_response
 
 /// Task completion callback
 typedef void (*mpd_client_task_cb) (const struct mpd_response *response,
-	const struct str_vector *data, void *user_data);
+	const struct strv *data, void *user_data);
 
 struct mpd_client_task
 {
@@ -1396,7 +1396,7 @@ struct mpd_client
 
 	struct mpd_client_task *tasks;      ///< Task queue
 	struct mpd_client_task *tasks_tail; ///< Tail of task queue
-	struct str_vector data;             ///< Data from last command
+	struct strv data;                   ///< Data from last command
 
 	// User configuration:
 
@@ -1431,7 +1431,7 @@ mpd_client_init (struct mpd_client *self, struct poller *poller)
 	str_init (&self->read_buffer);
 	str_init (&self->write_buffer);
 
-	str_vector_init (&self->data);
+	strv_init (&self->data);
 
 	poller_fd_init (&self->socket_event, poller, -1);
 	poller_timer_init (&self->timeout_timer, poller);
@@ -1446,7 +1446,7 @@ mpd_client_free (struct mpd_client *self)
 	str_free (&self->read_buffer);
 	str_free (&self->write_buffer);
 
-	str_vector_free (&self->data);
+	strv_free (&self->data);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1469,7 +1469,7 @@ mpd_client_reset (struct mpd_client *self)
 	str_reset (&self->read_buffer);
 	str_reset (&self->write_buffer);
 
-	str_vector_reset (&self->data);
+	strv_reset (&self->data);
 
 	self->got_hello = false;
 	self->idling = false;
@@ -1539,7 +1539,7 @@ mpd_client_dispatch (struct mpd_client *self, struct mpd_response *response)
 
 	if (task->callback)
 		task->callback (response, &self->data, task->user_data);
-	str_vector_reset (&self->data);
+	strv_reset (&self->data);
 
 	LIST_UNLINK_WITH_TAIL (self->tasks, self->tasks_tail, task);
 	free (task);
@@ -1572,7 +1572,7 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 	struct mpd_response response;
 	memset (&response, 0, sizeof response);
 	if (!strcmp (line, "list_OK"))
-		str_vector_add_owned (&self->data, NULL);
+		strv_add_owned (&self->data, NULL);
 	else if (mpd_client_parse_response (line, &response))
 	{
 		mpd_client_dispatch (self, &response);
@@ -1580,7 +1580,7 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 		free (response.message_text);
 	}
 	else
-		str_vector_add (&self->data, line);
+		strv_add (&self->data, line);
 	return true;
 }
 
@@ -1735,17 +1735,17 @@ mpd_client_send_commandv (struct mpd_client *self, char **commands)
 static void
 mpd_client_send_command (struct mpd_client *self, const char *command, ...)
 {
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 
 	va_list ap;
 	va_start (ap, command);
 	for (; command; command = va_arg (ap, const char *))
-		str_vector_add (&v, command);
+		strv_add (&v, command);
 	va_end (ap);
 
 	mpd_client_send_commandv (self, v.vector);
-	str_vector_free (&v);
+	strv_free (&v);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1793,7 +1793,7 @@ mpd_resolve_subsystem (const char *name, unsigned *output)
 
 static void
 mpd_client_on_idle_return (const struct mpd_response *response,
-	const struct str_vector *data, void *user_data)
+	const struct strv *data, void *user_data)
 {
 	(void) response;
 
@@ -1836,16 +1836,16 @@ mpd_client_idle (struct mpd_client *self, unsigned subsystems)
 {
 	hard_assert (!self->in_list);
 
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 
-	str_vector_add (&v, "idle");
+	strv_add (&v, "idle");
 	for (size_t i = 0; i < N_ELEMENTS (mpd_subsystem_names); i++)
 		if (subsystems & (1 << i))
-			str_vector_add (&v, mpd_subsystem_names[i]);
+			strv_add (&v, mpd_subsystem_names[i]);
 
 	mpd_client_send_commandv (self, v.vector);
-	str_vector_free (&v);
+	strv_free (&v);
 
 	self->timeout_timer.dispatcher = mpd_client_on_timeout;
 	self->timeout_timer.user_data = self;

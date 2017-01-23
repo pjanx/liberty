@@ -377,7 +377,7 @@ xstrndup (const char *s, size_t n)
 
 // --- Dynamically allocated string array --------------------------------------
 
-struct str_vector
+struct strv
 {
 	char **vector;
 	size_t len;
@@ -385,7 +385,7 @@ struct str_vector
 };
 
 static void
-str_vector_init (struct str_vector *self)
+strv_init (struct strv *self)
 {
 	self->alloc = 4;
 	self->len = 0;
@@ -393,7 +393,7 @@ str_vector_init (struct str_vector *self)
 }
 
 static void
-str_vector_free (struct str_vector *self)
+strv_free (struct strv *self)
 {
 	unsigned i;
 	for (i = 0; i < self->len; i++)
@@ -404,14 +404,14 @@ str_vector_free (struct str_vector *self)
 }
 
 static void
-str_vector_reset (struct str_vector *self)
+strv_reset (struct strv *self)
 {
-	str_vector_free (self);
-	str_vector_init (self);
+	strv_free (self);
+	strv_init (self);
 }
 
 static void
-str_vector_add_owned (struct str_vector *self, char *s)
+strv_add_owned (struct strv *self, char *s)
 {
 	self->vector[self->len] = s;
 	if (++self->len >= self->alloc)
@@ -421,38 +421,38 @@ str_vector_add_owned (struct str_vector *self, char *s)
 }
 
 static void
-str_vector_add (struct str_vector *self, const char *s)
+strv_add (struct strv *self, const char *s)
 {
-	str_vector_add_owned (self, xstrdup (s));
+	strv_add_owned (self, xstrdup (s));
 }
 
 static void
-str_vector_add_args (struct str_vector *self, const char *s, ...)
+strv_add_args (struct strv *self, const char *s, ...)
 	ATTRIBUTE_SENTINEL;
 
 static void
-str_vector_add_args (struct str_vector *self, const char *s, ...)
+strv_add_args (struct strv *self, const char *s, ...)
 {
 	va_list ap;
 
 	va_start (ap, s);
 	while (s)
 	{
-		str_vector_add (self, s);
+		strv_add (self, s);
 		s = va_arg (ap, const char *);
 	}
 	va_end (ap);
 }
 
 static void
-str_vector_add_vector (struct str_vector *self, char **vector)
+strv_add_vector (struct strv *self, char **vector)
 {
 	while (*vector)
-		str_vector_add (self, *vector++);
+		strv_add (self, *vector++);
 }
 
 static char *
-str_vector_steal (struct str_vector *self, size_t i)
+strv_steal (struct strv *self, size_t i)
 {
 	hard_assert (i < self->len);
 	char *tmp = self->vector[i];
@@ -462,9 +462,9 @@ str_vector_steal (struct str_vector *self, size_t i)
 }
 
 static void
-str_vector_remove (struct str_vector *self, size_t i)
+strv_remove (struct strv *self, size_t i)
 {
-	free (str_vector_steal (self, i));
+	free (strv_steal (self, i));
 }
 
 // --- Dynamically allocated strings -------------------------------------------
@@ -2915,17 +2915,17 @@ base64_encode (const void *data, size_t len, struct str *output)
 
 static void
 cstr_split (const char *s, const char *delimiters, bool ignore_empty,
-	struct str_vector *out)
+	struct strv *out)
 {
 	const char *begin = s, *end;
 	while ((end = strpbrk (begin, delimiters)))
 	{
 		if (!ignore_empty || begin != end)
-			str_vector_add_owned (out, xstrndup (begin, end - begin));
+			strv_add_owned (out, xstrndup (begin, end - begin));
 		begin = ++end;
 	}
 	if (!ignore_empty || *begin)
-		str_vector_add (out, begin);
+		strv_add (out, begin);
 }
 
 static char *
@@ -2957,7 +2957,7 @@ cstr_cut_until (const char *s, const char *alphabet)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static char *
-join_str_vector (const struct str_vector *v, char delimiter)
+join_strv (const struct strv *v, char delimiter)
 {
 	if (!v->len)
 		return xstrdup ("");
@@ -3188,7 +3188,7 @@ get_xdg_home_dir (struct str *output, const char *var, const char *def)
 
 static char *
 resolve_relative_filename_generic
-	(struct str_vector *paths, const char *tail, const char *filename)
+	(struct strv *paths, const char *tail, const char *filename)
 {
 	for (unsigned i = 0; i < paths->len; i++)
 	{
@@ -3208,12 +3208,12 @@ resolve_relative_filename_generic
 }
 
 static void
-get_xdg_config_dirs (struct str_vector *out)
+get_xdg_config_dirs (struct strv *out)
 {
 	struct str config_home;
 	str_init (&config_home);
 	get_xdg_home_dir (&config_home, "XDG_CONFIG_HOME", ".config");
-	str_vector_add (out, config_home.str);
+	strv_add (out, config_home.str);
 	str_free (&config_home);
 
 	const char *xdg_config_dirs;
@@ -3225,22 +3225,22 @@ get_xdg_config_dirs (struct str_vector *out)
 static char *
 resolve_relative_config_filename (const char *filename)
 {
-	struct str_vector paths;
-	str_vector_init (&paths);
+	struct strv paths;
+	strv_init (&paths);
 	get_xdg_config_dirs (&paths);
 	char *result = resolve_relative_filename_generic
 		(&paths, PROGRAM_NAME "/", filename);
-	str_vector_free (&paths);
+	strv_free (&paths);
 	return result;
 }
 
 static void
-get_xdg_data_dirs (struct str_vector *out)
+get_xdg_data_dirs (struct strv *out)
 {
 	struct str data_home;
 	str_init (&data_home);
 	get_xdg_home_dir (&data_home, "XDG_DATA_HOME", ".local/share");
-	str_vector_add (out, data_home.str);
+	strv_add (out, data_home.str);
 	str_free (&data_home);
 
 	const char *xdg_data_dirs;
@@ -3252,12 +3252,12 @@ get_xdg_data_dirs (struct str_vector *out)
 static char *
 resolve_relative_data_filename (const char *filename)
 {
-	struct str_vector paths;
-	str_vector_init (&paths);
+	struct strv paths;
+	strv_init (&paths);
 	get_xdg_data_dirs (&paths);
 	char *result = resolve_relative_filename_generic
 		(&paths, PROGRAM_NAME "/", filename);
-	str_vector_free (&paths);
+	strv_free (&paths);
 	return result;
 }
 
@@ -3406,7 +3406,7 @@ regex_free (void *regex)
 // The cost of hashing a string is likely to be significantly smaller than that
 // of compiling the whole regular expression anew, so here is a simple cache.
 // Adding basic support for subgroups is easy: check `re_nsub' and output into
-// a `struct str_vector' (if all we want is the substrings).
+// a `struct strv' (if all we want is the substrings).
 
 static void
 regex_cache_init (struct str_map *cache)
@@ -4630,8 +4630,8 @@ config_item_get (struct config_item *self, const char *path, struct error **e)
 {
 	hard_assert (self->type == CONFIG_ITEM_OBJECT);
 
-	struct str_vector v;
-	str_vector_init (&v);
+	struct strv v;
+	strv_init (&v);
 	cstr_split (path, ".", false, &v);
 
 	struct config_item *result = NULL;
@@ -4651,7 +4651,7 @@ config_item_get (struct config_item *self, const char *path, struct error **e)
 			continue;
 		break;
 	}
-	str_vector_free (&v);
+	strv_free (&v);
 	return result;
 }
 
