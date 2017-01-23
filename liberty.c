@@ -411,7 +411,7 @@ strv_reset (struct strv *self)
 }
 
 static void
-strv_add_owned (struct strv *self, char *s)
+strv_append_owned (struct strv *self, char *s)
 {
 	self->vector[self->len] = s;
 	if (++self->len >= self->alloc)
@@ -421,34 +421,34 @@ strv_add_owned (struct strv *self, char *s)
 }
 
 static void
-strv_add (struct strv *self, const char *s)
+strv_append (struct strv *self, const char *s)
 {
-	strv_add_owned (self, xstrdup (s));
+	strv_append_owned (self, xstrdup (s));
 }
 
 static void
-strv_add_args (struct strv *self, const char *s, ...)
+strv_append_args (struct strv *self, const char *s, ...)
 	ATTRIBUTE_SENTINEL;
 
 static void
-strv_add_args (struct strv *self, const char *s, ...)
+strv_append_args (struct strv *self, const char *s, ...)
 {
 	va_list ap;
 
 	va_start (ap, s);
 	while (s)
 	{
-		strv_add (self, s);
+		strv_append (self, s);
 		s = va_arg (ap, const char *);
 	}
 	va_end (ap);
 }
 
 static void
-strv_add_vector (struct strv *self, char **vector)
+strv_append_vector (struct strv *self, char **vector)
 {
 	while (*vector)
-		strv_add (self, *vector++);
+		strv_append (self, *vector++);
 }
 
 static char *
@@ -2921,11 +2921,11 @@ cstr_split (const char *s, const char *delimiters, bool ignore_empty,
 	while ((end = strpbrk (begin, delimiters)))
 	{
 		if (!ignore_empty || begin != end)
-			strv_add_owned (out, xstrndup (begin, end - begin));
+			strv_append_owned (out, xstrndup (begin, end - begin));
 		begin = ++end;
 	}
 	if (!ignore_empty || *begin)
-		strv_add (out, begin);
+		strv_append (out, begin);
 }
 
 static char *
@@ -3213,7 +3213,7 @@ get_xdg_config_dirs (struct strv *out)
 	struct str config_home;
 	str_init (&config_home);
 	get_xdg_home_dir (&config_home, "XDG_CONFIG_HOME", ".config");
-	strv_add (out, config_home.str);
+	strv_append (out, config_home.str);
 	str_free (&config_home);
 
 	const char *xdg_config_dirs;
@@ -3240,7 +3240,7 @@ get_xdg_data_dirs (struct strv *out)
 	struct str data_home;
 	str_init (&data_home);
 	get_xdg_home_dir (&data_home, "XDG_DATA_HOME", ".local/share");
-	strv_add (out, data_home.str);
+	strv_append (out, data_home.str);
 	str_free (&data_home);
 
 	const char *xdg_data_dirs;

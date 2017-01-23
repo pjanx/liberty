@@ -132,7 +132,7 @@ irc_parse_message (struct irc_message *msg, const char *line)
 
 		if (*line == ':')
 		{
-			strv_add (&msg->params, ++line);
+			strv_append (&msg->params, ++line);
 			break;
 		}
 
@@ -140,7 +140,7 @@ irc_parse_message (struct irc_message *msg, const char *line)
 		if (!param_len)
 			break;
 
-		strv_add_owned (&msg->params, xstrndup (line, param_len));
+		strv_append_owned (&msg->params, xstrndup (line, param_len));
 		line += param_len;
 	}
 }
@@ -1572,7 +1572,7 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 	struct mpd_response response;
 	memset (&response, 0, sizeof response);
 	if (!strcmp (line, "list_OK"))
-		strv_add_owned (&self->data, NULL);
+		strv_append_owned (&self->data, NULL);
 	else if (mpd_client_parse_response (line, &response))
 	{
 		mpd_client_dispatch (self, &response);
@@ -1580,7 +1580,7 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 		free (response.message_text);
 	}
 	else
-		strv_add (&self->data, line);
+		strv_append (&self->data, line);
 	return true;
 }
 
@@ -1741,7 +1741,7 @@ mpd_client_send_command (struct mpd_client *self, const char *command, ...)
 	va_list ap;
 	va_start (ap, command);
 	for (; command; command = va_arg (ap, const char *))
-		strv_add (&v, command);
+		strv_append (&v, command);
 	va_end (ap);
 
 	mpd_client_send_commandv (self, v.vector);
@@ -1839,10 +1839,10 @@ mpd_client_idle (struct mpd_client *self, unsigned subsystems)
 	struct strv v;
 	strv_init (&v);
 
-	strv_add (&v, "idle");
+	strv_append (&v, "idle");
 	for (size_t i = 0; i < N_ELEMENTS (mpd_subsystem_names); i++)
 		if (subsystems & (1 << i))
-			strv_add (&v, mpd_subsystem_names[i]);
+			strv_append (&v, mpd_subsystem_names[i]);
 
 	mpd_client_send_commandv (self, v.vector);
 	strv_free (&v);

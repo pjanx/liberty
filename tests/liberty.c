@@ -162,7 +162,7 @@ test_strv (void)
 	struct strv v;
 	strv_init (&v);
 
-	strv_add_owned (&v, xstrdup ("xkcd"));
+	strv_append_owned (&v, xstrdup ("xkcd"));
 	strv_reset (&v);
 
 	const char *a[] =
@@ -171,17 +171,17 @@ test_strv (void)
 	// Add the first two items via another vector
 	struct strv w;
 	strv_init (&w);
-	strv_add_args (&w, a[0], a[1], NULL);
-	strv_add_vector (&v, w.vector);
+	strv_append_args (&w, a[0], a[1], NULL);
+	strv_append_vector (&v, w.vector);
 	strv_free (&w);
 
 	// Add an item and delete it right after
-	strv_add (&v, "test");
+	strv_append (&v, "test");
 	strv_remove (&v, v.len - 1);
 
 	// Add the rest of the list properly
 	for (int i = 2; i < (int) N_ELEMENTS (a); i++)
-		strv_add (&v, a[i]);
+		strv_append (&v, a[i]);
 
 	// Check the contents
 	soft_assert (v.len == N_ELEMENTS (a));
