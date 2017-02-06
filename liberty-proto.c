@@ -1275,10 +1275,7 @@ ws_parser_push (struct ws_parser *self, const void *data, size_t len)
 	case WS_PARSER_PAYLOAD:
 		// Move the buffer so that payload data is at the front
 		str_remove_slice (&self->input, 0, unpacker.offset);
-
-		// And continue unpacking frames past the payload
 		msg_unpacker_init (&unpacker, self->input.str, self->input.len);
-		unpacker.offset = self->payload_len;
 
 		if (self->input.len < self->payload_len)
 			goto need_data;
@@ -1287,6 +1284,8 @@ ws_parser_push (struct ws_parser *self, const void *data, size_t len)
 		if (!self->on_frame (self->user_data, self))
 			goto fail;
 
+		// And continue unpacking frames past the payload
+		unpacker.offset = self->payload_len;
 		self->state = WS_PARSER_FIXED;
 		break;
 	}
