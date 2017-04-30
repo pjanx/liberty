@@ -1,0 +1,8 @@
+define() { [ -z "$2" ] && { echo $1 is undefined; exit 1; } || eval "$1='$2'"; }
+
+define name    "@name@"
+define version "@version@"
+define summary "@summary@"
+define author  "@author@"
+define arch    "@arch@"
+define system  "@system@"
