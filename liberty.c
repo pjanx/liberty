@@ -1326,6 +1326,9 @@ struct poller_fd
 
 	int fd;                             ///< Our file descriptor
 	short events;                       ///< The poll() events we registered for
+
+	// Make triple sure that no forked child is keeping the FD,
+	// otherwise we may access freed memory on Linux (poor epoll design)
 	bool closed;                        ///< Whether fd has been closed already
 
 	poller_fd_fn dispatcher;            ///< Event dispatcher

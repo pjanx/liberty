@@ -1460,6 +1460,7 @@ mpd_client_reset (struct mpd_client *self)
 		xclose (self->socket);
 	self->socket = -1;
 
+	// FIXME: this is not robust wrt. forking
 	self->socket_event.closed = true;
 	poller_fd_reset (&self->socket_event);
 	poller_timer_reset (&self->timeout_timer);
