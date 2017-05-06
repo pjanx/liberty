@@ -2639,7 +2639,7 @@ tolower_ascii (int c)
 static int
 toupper_ascii (int c)
 {
-	return c >= 'A' && c <= 'Z' ? c : c - ('a' - 'A');
+	return c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c;
 }
 
 TRIVIAL_STRXFRM (tolower_ascii_strxfrm, tolower_ascii)
