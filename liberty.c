@@ -4336,8 +4336,8 @@ socket_io_try_read (int socket_fd, struct str *rb)
 	while (rb->len < read_limit)
 	{
 		str_reserve (rb, 1024);
-		n_read = recv (socket_fd, rb->str + rb->len,
-			rb->alloc - rb->len - 1 /* null byte */, 0);
+		n_read = read (socket_fd, rb->str + rb->len,
+			rb->alloc - rb->len - 1 /* null byte */);
 
 		if (n_read > 0)
 		{
@@ -4353,7 +4353,7 @@ socket_io_try_read (int socket_fd, struct str *rb)
 			continue;
 
 		int errno_save = errno;
-		LOG_LIBC_FAILURE ("recv");
+		LOG_LIBC_FAILURE ("read");
 		errno = errno_save;
 		return SOCKET_IO_ERROR;
 	}
@@ -4366,7 +4366,7 @@ socket_io_try_write (int socket_fd, struct str *wb)
 	ssize_t n_written;
 	while (wb->len)
 	{
-		n_written = send (socket_fd, wb->str, wb->len, 0);
+		n_written = write (socket_fd, wb->str, wb->len);
 		if (n_written >= 0)
 		{
 			str_remove_slice (wb, 0, n_written);
@@ -4379,7 +4379,7 @@ socket_io_try_write (int socket_fd, struct str *wb)
 			continue;
 
 		int errno_save = errno;
-		LOG_LIBC_FAILURE ("send");
+		LOG_LIBC_FAILURE ("write");
 		errno = errno_save;
 		return SOCKET_IO_ERROR;
 	}
