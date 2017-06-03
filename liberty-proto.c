@@ -1356,7 +1356,7 @@ struct mpd_response
 	char *message_text;                 ///< Error message
 };
 
-/// Task completion callback
+/// Task completion callback; on connection abortion most fields are 0
 typedef void (*mpd_client_task_cb) (const struct mpd_response *response,
 	const struct strv *data, void *user_data);
 
@@ -1449,10 +1449,31 @@ mpd_client_free (struct mpd_client *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+static void
+mpd_client_dispatch (struct mpd_client *self, struct mpd_response *response)
+{
+	struct mpd_client_task *task;
+	if (!(task = self->tasks))
+		return;
+
+	if (task->callback)
+		task->callback (response, &self->data, task->user_data);
+	strv_reset (&self->data);
+
+	LIST_UNLINK_WITH_TAIL (self->tasks, self->tasks_tail, task);
+	free (task);
+}
+
 /// Reinitialize the interface so that you can reconnect anew
 static void
 mpd_client_reset (struct mpd_client *self)
 {
+	// Get rid of all pending tasks to release resources etc.
+	strv_reset (&self->data);
+	struct mpd_response aborted = { .message_text = "Disconnected" };
+	while (self->tasks)
+		mpd_client_dispatch (self, &aborted);
+
 	if (self->state == MPD_CONNECTING)
 		mpd_client_destroy_connector (self);
 
@@ -1468,16 +1489,10 @@ mpd_client_reset (struct mpd_client *self)
 	str_reset (&self->read_buffer);
 	str_reset (&self->write_buffer);
 
-	strv_reset (&self->data);
-
 	self->got_hello = false;
 	self->idling = false;
 	self->idling_subsystems = 0;
 	self->in_list = false;
-
-	LIST_FOR_EACH (struct mpd_client_task, iter, self->tasks)
-		free (iter);
-	self->tasks = self->tasks_tail = NULL;
 
 	self->state = MPD_DISCONNECTED;
 }
@@ -1527,21 +1542,6 @@ mpd_client_parse_response (const char *p, struct mpd_response *response)
 	response->message_text = xstrdup (p);
 	response->success = false;
 	return true;
-}
-
-static void
-mpd_client_dispatch (struct mpd_client *self, struct mpd_response *response)
-{
-	struct mpd_client_task *task;
-	if (!(task = self->tasks))
-		return;
-
-	if (task->callback)
-		task->callback (response, &self->data, task->user_data);
-	strv_reset (&self->data);
-
-	LIST_UNLINK_WITH_TAIL (self->tasks, self->tasks_tail, task);
-	free (task);
 }
 
 static bool
