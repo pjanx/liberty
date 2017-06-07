@@ -3495,14 +3495,10 @@ write_file_safe (const char *filename, const void *data, size_t data_len,
 
 // --- Simple configuration ----------------------------------------------------
 
-// The keys are stripped of surrounding whitespace, the values are not.
+// This is the bare minimum to make an application configurable.
+// Keys are stripped of surrounding whitespace, values are not.
 
-struct simple_config_item
-{
-	const char *key;
-	const char *default_value;
-	const char *description;
-};
+struct simple_config_item { const char *key, *default_value, *description; };
 
 static void
 simple_config_load_defaults
@@ -3520,51 +3516,28 @@ simple_config_update_from_file (struct str_map *config, struct error **e)
 {
 	char *filename = resolve_filename
 		(PROGRAM_NAME ".conf", resolve_relative_config_filename);
-	if (!filename)
-		return true;
-
-	FILE *fp = fopen (filename, "r");
-	if (!fp)
+	struct str s = str_make ();
+	bool ok = !filename || read_file (filename, &s, e);
+	size_t line_no = 0;
+	for (char *x = strtok (s.str, "\r\n"); ok && x; x = strtok (NULL, "\r\n"))
 	{
-		error_set (e, "could not open `%s' for reading: %s",
-			filename, strerror (errno));
-		free (filename);
-		return false;
-	}
-
-	struct str line = str_make ();
-	bool errors = false;
-	for (unsigned line_no = 1; read_line (fp, &line); line_no++)
-	{
-		char *start = line.str;
-		if (*start == '#')
+		line_no++;
+		if (strchr ("#", *(x += strspn (x, " \t"))))
 			continue;
 
-		while (isspace (*start))
-			start++;
-
-		char *end = strchr (start, '=');
-		if (end)
+		char *equals = strchr (x, '=');
+		if (!equals || equals == x)
+			ok = error_set (e, "%s: malformed line %zu", filename, line_no);
+		else
 		{
-			char *value = end + 1;
-			do
-				*end = '\0';
-			while (isspace (*--end));
-
-			str_map_set (config, start, xstrdup (value));
-		}
-		else if (*start)
-		{
-			error_set (e, "line %u in config: %s", line_no, "malformed input");
-			errors = true;
-			break;
+			char *end = equals++;
+			do *end = '\0'; while (strchr (" \t", *--end));
+			str_map_set (config, x, xstrdup (equals));
 		}
 	}
-
-	str_free (&line);
-	fclose (fp);
+	str_free (&s);
 	free (filename);
-	return !errors;
+	return ok;
 }
 
 static char *
