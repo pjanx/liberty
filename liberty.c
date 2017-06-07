@@ -3040,23 +3040,19 @@ xstrtoul (unsigned long *out, const char *s, int base)
 }
 
 static bool
-read_line (FILE *fp, struct str *s)
+read_line (FILE *fp, struct str *line)
 {
+	str_reset (line);
+
 	int c;
-	bool at_end = true;
-
-	str_reset (s);
-	while ((c = fgetc (fp)) != EOF)
+	while ((c = fgetc (fp)) != '\n')
 	{
-		at_end = false;
-		if (c == '\r')
-			continue;
-		if (c == '\n')
-			break;
-		str_append_c (s, c);
+		if (c == EOF)
+			return line->len != 0;
+		if (c != '\r')
+			str_append_c (line, c);
 	}
-
-	return !at_end;
+	return true;
 }
 
 static char *
