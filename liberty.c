@@ -5321,7 +5321,7 @@ end:
 }
 
 /// Clone an item.  Schema assignments aren't retained.
-struct config_item *
+static struct config_item *
 config_item_clone (struct config_item *self)
 {
 	// Oh well, it saves code
