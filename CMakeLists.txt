@@ -34,15 +34,8 @@ foreach (extra iconv rt)
 	endif (extra_lib_${extra})
 endforeach (extra)
 
-# Generate a configuration file
-# TODO: actualy use the configuration file for something; so far we allow
-#   for direct inclusion without running this CMakeLists.txt
-configure_file (${PROJECT_SOURCE_DIR}/liberty-config.h.in
-	${PROJECT_BINARY_DIR}/liberty-config.h)
-include_directories (${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR})
-set (common_sources ${PROJECT_BINARY_DIR}/liberty-config.h)
-
 # Build some unit tests
+include_directories (${PROJECT_SOURCE_DIR})
 enable_testing ()
 foreach (name liberty proto)
 	add_executable (test-${name} tests/${name}.c ${common_sources})
