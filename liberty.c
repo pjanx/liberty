@@ -383,12 +383,14 @@ struct strv
 	size_t alloc;
 };
 
-static void
-strv_init (struct strv *self)
+static struct strv
+strv_make (void)
 {
-	self->alloc = 4;
-	self->len = 0;
-	self->vector = xcalloc (sizeof *self->vector, self->alloc);
+	struct strv self;
+	self.alloc = 4;
+	self.len = 0;
+	self.vector = xcalloc (sizeof *self.vector, self.alloc);
+	return self;
 }
 
 static void
@@ -406,7 +408,7 @@ static void
 strv_reset (struct strv *self)
 {
 	strv_free (self);
-	strv_init (self);
+	*self = strv_make ();
 }
 
 static void
@@ -481,12 +483,14 @@ struct str
 /// long as the allocation is below the given threshold.  (Trivial heuristics.)
 #define STR_SHRINK_THRESHOLD (1 << 20)
 
-static void
-str_init (struct str *self)
+static struct str
+str_make (void)
 {
-	self->alloc = 16;
-	self->len = 0;
-	self->str = strcpy (xmalloc (self->alloc), "");
+	struct str self;
+	self.alloc = 16;
+	self.len = 0;
+	self.str = strcpy (xmalloc (self.alloc), "");
+	return self;
 }
 
 static void
@@ -502,7 +506,7 @@ static void
 str_reset (struct str *self)
 {
 	str_free (self);
-	str_init (self);
+	*self = str_make ();
 }
 
 static char *
@@ -802,15 +806,17 @@ struct str_map
 
 typedef void (*str_map_free_fn) (void *);
 
-static void
-str_map_init (struct str_map *self)
+static struct str_map
+str_map_make (str_map_free_fn free)
 {
-	self->alloc = STR_MAP_MIN_ALLOC;
-	self->len = 0;
-	self->free = NULL;
-	self->key_xfrm = NULL;
-	self->map = xcalloc (self->alloc, sizeof *self->map);
-	self->shrink_lock = false;
+	struct str_map self;
+	self.alloc = STR_MAP_MIN_ALLOC;
+	self.len = 0;
+	self.free = free;
+	self.key_xfrm = NULL;
+	self.map = xcalloc (self.alloc, sizeof *self.map);
+	self.shrink_lock = false;
+	return self;
 }
 
 static void
@@ -1003,12 +1009,10 @@ struct str_map_iter
 	struct str_map_link *link;          ///< Current link
 };
 
-static void
-str_map_iter_init (struct str_map_iter *self, const struct str_map *map)
+static struct str_map_iter
+str_map_iter_make (const struct str_map *map)
 {
-	self->map = map;
-	self->next_index = 0;
-	self->link = NULL;
+	return (struct str_map_iter) { .map = map, .next_index = 0, .link = NULL };
 }
 
 static void *
@@ -1038,13 +1042,15 @@ struct str_map_unset_iter
 	struct str_map_link *next;          ///< Next link
 };
 
-static void
-str_map_unset_iter_init (struct str_map_unset_iter *self, struct str_map *map)
+static struct str_map_unset_iter
+str_map_unset_iter_make (struct str_map *map)
 {
-	str_map_iter_init (&self->iter, map);
+	struct str_map_unset_iter self;
+	self.iter = str_map_iter_make (map);
 	map->shrink_lock = true;
-	(void) str_map_iter_next (&self->iter);
-	self->next = self->iter.link;
+	(void) str_map_iter_next (&self.iter);
+	self.next = self.iter.link;
+	return self;
 }
 
 static void *
@@ -1118,11 +1124,10 @@ struct async_manager
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static void
-async_init (struct async *self, struct async_manager *manager)
+static struct async
+async_make (struct async_manager *manager)
 {
-	memset (self, 0, sizeof *self);
-	self->manager = manager;
+	return (struct async) { .manager = manager };
 }
 
 /// Only allowed from the main thread once the job has been started but before
@@ -1266,17 +1271,18 @@ async_manager_cancel_all (struct async_manager *self)
 	async_manager_dispatch (self);
 }
 
-static void
-async_manager_init (struct async_manager *self)
+static struct async_manager
+async_manager_make (void)
 {
-	memset (self, 0, sizeof *self);
-	hard_assert (!pthread_mutex_init (&self->lock, NULL));
-	hard_assert (!pthread_cond_init (&self->finished_cond, NULL));
+	struct async_manager self = {};
+	hard_assert (!pthread_mutex_init (&self.lock, NULL));
+	hard_assert (!pthread_cond_init (&self.finished_cond, NULL));
 
-	hard_assert (!pipe (self->finished_pipe));
-	hard_assert (set_blocking (self->finished_pipe[0], false));
-	set_cloexec (self->finished_pipe[0]);
-	set_cloexec (self->finished_pipe[1]);
+	hard_assert (!pipe (self.finished_pipe));
+	hard_assert (set_blocking (self.finished_pipe[0], false));
+	set_cloexec (self.finished_pipe[0]);
+	set_cloexec (self.finished_pipe[1]);
+	return self;
 }
 
 static void
@@ -1355,12 +1361,14 @@ struct poller_timers
 	size_t alloc;                       ///< Number of timers allocated
 };
 
-static void
-poller_timers_init (struct poller_timers *self)
+static struct poller_timers
+poller_timers_make (void)
 {
-	self->alloc = POLLER_MIN_ALLOC;
-	self->len = 0;
-	self->heap = xmalloc (self->alloc * sizeof *self->heap);
+	struct poller_timers self;
+	self.alloc = POLLER_MIN_ALLOC;
+	self.len = 0;
+	self.heap = xmalloc (self.alloc * sizeof *self.heap);
+	return self;
 }
 
 static void
@@ -2085,12 +2093,11 @@ poller_run (struct poller *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static void
-poller_timer_init (struct poller_timer *self, struct poller *poller)
+static struct poller_timer
+poller_timer_make (struct poller *poller)
 {
-	memset (self, 0, sizeof *self);
-	self->timers = &poller->common.timers;
-	self->index = -1;
+	return (struct poller_timer)
+		{ .timers = &poller->common.timers, .index = -1, };
 }
 
 static void
@@ -2115,11 +2122,10 @@ poller_timer_reset (struct poller_timer *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static void
-poller_idle_init (struct poller_idle *self, struct poller *poller)
+static struct poller_idle
+poller_idle_make (struct poller *poller)
 {
-	memset (self, 0, sizeof *self);
-	self->poller = poller;
+	return (struct poller_idle) { .poller = poller };
 }
 
 static void
@@ -2146,13 +2152,10 @@ poller_idle_reset (struct poller_idle *self)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static void
-poller_fd_init (struct poller_fd *self, struct poller *poller, int fd)
+static struct poller_fd
+poller_fd_make (struct poller *poller, int fd)
 {
-	memset (self, 0, sizeof *self);
-	self->poller = poller;
-	self->index = -1;
-	self->fd = fd;
+	return (struct poller_fd) { .poller = poller, .index = -1, .fd = fd };
 }
 
 static void
@@ -2183,12 +2186,12 @@ poller_common_dummy_dispatcher (const struct pollfd *pfd, void *user_data)
 static void
 poller_common_init (struct poller_common *self, struct poller *poller)
 {
-	poller_timers_init (&self->timers);
+	self->timers = poller_timers_make ();
 	self->idle = NULL;
 #ifdef LIBERTY_WANT_ASYNC
-	async_manager_init (&self->async);
+	self->async = async_manager_make ();
 
-	poller_fd_init (&self->async_event, poller, self->async.finished_pipe[0]);
+	self->async_event = poller_fd_make (poller, self->async.finished_pipe[0]);
 	poller_fd_set (&self->async_event, POLLIN);
 	self->async_event.dispatcher = poller_common_dummy_dispatcher;
 	self->async_event.user_data = self;
@@ -2289,7 +2292,7 @@ async_getaddrinfo (struct async_manager *manager,
 	const char *host, const char *service, const struct addrinfo *hints)
 {
 	struct async_getaddrinfo *self = xcalloc (1, sizeof *self);
-	async_init (&self->async, manager);
+	self->async = async_make (manager);
 
 	if (host)     self->host = xstrdup (host);
 	if (service)  self->service = xstrdup (service);
@@ -2353,7 +2356,7 @@ async_getnameinfo (struct async_manager *manager,
 	const struct sockaddr *sa, socklen_t sa_len, int flags)
 {
 	struct async_getnameinfo *self = xcalloc (1, sizeof *self);
-	async_init (&self->async, manager);
+	self->async = async_make (manager);
 
 	self->address = memcpy (xmalloc (sa_len), sa, sa_len);
 	self->address_len = sa_len;
@@ -2387,12 +2390,10 @@ struct write_queue
 	size_t len;
 };
 
-static void
-write_queue_init (struct write_queue *self)
+static struct write_queue
+write_queue_make (void)
 {
-	self->head = self->tail = NULL;
-	self->head_offset = 0;
-	self->len = 0;
+	return (struct write_queue) {};
 }
 
 static void
@@ -2444,11 +2445,10 @@ struct msg_reader
 	uint64_t offset;                    ///< Current offset in the buffer
 };
 
-static void
-msg_reader_init (struct msg_reader *self)
+static struct msg_reader
+msg_reader_make (void)
 {
-	str_init (&self->buf);
-	self->offset = 0;
+	return (struct msg_reader) { .buf = str_make (), .offset = 0 };
 }
 
 static void
@@ -2520,12 +2520,10 @@ struct msg_unpacker
 	size_t len;
 };
 
-static void
-msg_unpacker_init (struct msg_unpacker *self, const void *data, size_t len)
+static struct msg_unpacker
+msg_unpacker_make (const void *data, size_t len)
 {
-	self->data = data;
-	self->len = len;
-	self->offset = 0;
+	return (struct msg_unpacker) { .data = data, .len = len, .offset = 0 };
 }
 
 static size_t
@@ -2600,12 +2598,13 @@ struct msg_writer
 	struct str buf;                     ///< Holds the message data
 };
 
-static void
-msg_writer_init (struct msg_writer *self)
+static struct msg_writer
+msg_writer_make (void)
 {
-	str_init (&self->buf);
+	struct msg_writer self = { .buf = str_make () };
 	// Placeholder for message length
-	str_append_data (&self->buf, "\x00\x00\x00\x00" "\x00\x00\x00\x00", 8);
+	str_append_data (&self.buf, "\x00\x00\x00\x00" "\x00\x00\x00\x00", 8);
+	return self;
 }
 
 static void *
@@ -2765,10 +2764,10 @@ struct utf8_iter
 	size_t len;                         ///< How many bytes remain
 };
 
-static void
-utf8_iter_init (struct utf8_iter *self, const char *s)
+static struct utf8_iter
+utf8_iter_make (const char *s)
 {
-	self->len = strlen ((self->s = s));
+	return (struct utf8_iter) { .s = s, .len = strlen (s) };
 }
 
 static int32_t
@@ -2964,8 +2963,7 @@ strv_join (const struct strv *v, const char *delimiter)
 	if (!v->len)
 		return xstrdup ("");
 
-	struct str result;
-	str_init (&result);
+	struct str result = str_make ();
 	str_append (&result, v->vector[0]);
 	for (size_t i = 1; i < v->len; i++)
 		str_append_printf (&result, "%s%s", delimiter, v->vector[i]);
@@ -2978,8 +2976,7 @@ static char *
 xstrdup_printf (const char *format, ...)
 {
 	va_list ap;
-	struct str tmp;
-	str_init (&tmp);
+	struct str tmp = str_make ();
 	va_start (ap, format);
 	str_append_vprintf (&tmp, format, ap);
 	va_end (ap);
@@ -3099,8 +3096,7 @@ lock_pid_file (const char *path, struct error **e)
 		return -1;
 	}
 
-	struct str pid;
-	str_init (&pid);
+	struct str pid = str_make ();
 	str_append_printf (&pid, "%ld", (long) getpid ());
 
 	if (ftruncate (fd, 0)
@@ -3208,8 +3204,7 @@ resolve_relative_filename_generic
 static void
 get_xdg_config_dirs (struct strv *out)
 {
-	struct str config_home;
-	str_init (&config_home);
+	struct str config_home = str_make ();
 	get_xdg_home_dir (&config_home, "XDG_CONFIG_HOME", ".config");
 	strv_append (out, config_home.str);
 	str_free (&config_home);
@@ -3223,8 +3218,7 @@ get_xdg_config_dirs (struct strv *out)
 static char *
 resolve_relative_config_filename (const char *filename)
 {
-	struct strv paths;
-	strv_init (&paths);
+	struct strv paths = strv_make ();
 	get_xdg_config_dirs (&paths);
 	char *result = resolve_relative_filename_generic
 		(&paths, PROGRAM_NAME "/", filename);
@@ -3235,8 +3229,7 @@ resolve_relative_config_filename (const char *filename)
 static void
 get_xdg_data_dirs (struct strv *out)
 {
-	struct str data_home;
-	str_init (&data_home);
+	struct str data_home = str_make ();
 	get_xdg_home_dir (&data_home, "XDG_DATA_HOME", ".local/share");
 	strv_append (out, data_home.str);
 	str_free (&data_home);
@@ -3250,8 +3243,7 @@ get_xdg_data_dirs (struct strv *out)
 static char *
 resolve_relative_data_filename (const char *filename)
 {
-	struct strv paths;
-	strv_init (&paths);
+	struct strv paths = strv_make ();
 	get_xdg_data_dirs (&paths);
 	char *result = resolve_relative_filename_generic
 		(&paths, PROGRAM_NAME "/", filename);
@@ -3262,9 +3254,7 @@ resolve_relative_data_filename (const char *filename)
 static char *
 resolve_relative_runtime_filename (const char *filename)
 {
-	struct str path;
-	str_init (&path);
-
+	struct str path = str_make ();
 	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
 	if (runtime_dir && *runtime_dir == '/')
 		str_append (&path, runtime_dir);
@@ -3290,8 +3280,7 @@ try_expand_tilde (const char *filename)
 	size_t until_slash = strcspn (filename, "/");
 	if (!until_slash)
 	{
-		struct str expanded;
-		str_init (&expanded);
+		struct str expanded = str_make ();
 		str_append_env_path (&expanded, "HOME", false);
 		str_append (&expanded, filename);
 		return str_steal (&expanded);
@@ -3406,11 +3395,10 @@ regex_free (void *regex)
 // Adding basic support for subgroups is easy: check `re_nsub' and output into
 // a `struct strv' (if all we want is the substrings).
 
-static void
-regex_cache_init (struct str_map *cache)
+static struct str_map
+regex_cache_make (void)
 {
-	str_map_init (cache);
-	cache->free = regex_free;
+	return str_map_make (regex_free);
 }
 
 static bool
@@ -3544,9 +3532,7 @@ simple_config_update_from_file (struct str_map *config, struct error **e)
 		return false;
 	}
 
-	struct str line;
-	str_init (&line);
-
+	struct str line = str_make ();
 	bool errors = false;
 	for (unsigned line_no = 1; read_line (fp, &line); line_no++)
 	{
@@ -3585,9 +3571,7 @@ static char *
 write_configuration_file (const char *path_hint, const struct str *data,
 	struct error **e)
 {
-	struct str path;
-	str_init (&path);
-
+	struct str path = str_make ();
 	if (path_hint)
 		str_append (&path, path_hint);
 	else
@@ -3608,9 +3592,7 @@ static char *
 simple_config_write_default (const char *path_hint, const char *prolog,
 	const struct simple_config_item *table, struct error **e)
 {
-	struct str data;
-	str_init (&data);
-
+	struct str data = str_make ();
 	if (prolog)
 		str_append (&data, prolog);
 
@@ -3702,31 +3684,31 @@ opt_handler_free (struct opt_handler *self)
 	free (self->opt_string);
 }
 
-static void
-opt_handler_init (struct opt_handler *self, int argc, char **argv,
+static struct opt_handler
+opt_handler_make (int argc, char **argv,
 	const struct opt *opts, const char *arg_hint, const char *description)
 {
-	memset (self, 0, sizeof *self);
-	self->argc = argc;
-	self->argv = argv;
-	self->arg_hint = arg_hint;
-	self->description = description;
+	struct opt_handler self =
+	{
+		.argc = argc,
+		.argv = argv,
+		.arg_hint = arg_hint,
+		.description = description,
+	};
 
 	size_t len = 0;
 	for (const struct opt *iter = opts; iter->long_name; iter++)
 		len++;
 
-	self->opts = opts;
-	self->opts_len = len;
-	self->options = xcalloc (len + 1, sizeof *self->options);
+	self.opts = opts;
+	self.opts_len = len;
+	self.options = xcalloc (len + 1, sizeof *self.options);
 
-	struct str opt_string;
-	str_init (&opt_string);
-
+	struct str opt_string = str_make ();
 	for (size_t i = 0; i < len; i++)
 	{
 		const struct opt *opt = opts + i;
-		struct option *mapped = self->options + i;
+		struct option *mapped = self.options + i;
 
 		mapped->name = opt->long_name;
 		if (!opt->arg_hint)
@@ -3748,25 +3730,21 @@ opt_handler_init (struct opt_handler *self, int argc, char **argv,
 				str_append_c (&opt_string, ':');
 		}
 	}
-
-	self->opt_string = str_steal (&opt_string);
+	self.opt_string = str_steal (&opt_string);
+	return self;
 }
 
 static void
 opt_handler_usage (const struct opt_handler *self, FILE *stream)
 {
-	struct str usage;
-	str_init (&usage);
-
+	struct str usage = str_make ();
 	str_append_printf (&usage, "Usage: %s [OPTION]... %s\n",
 		self->argv[0], self->arg_hint ? self->arg_hint : "");
 	str_append_printf (&usage, "%s\n\n", self->description);
 
 	for (size_t i = 0; i < self->opts_len; i++)
 	{
-		struct str row;
-		str_init (&row);
-
+		struct str row = str_make ();
 		const struct opt *opt = self->opts + i;
 		if (!(opt->flags & OPT_LONG_ONLY))
 			str_append_printf (&row, "  -%c, ", opt->short_name);
@@ -3837,8 +3815,8 @@ static void
 test_init (struct test *self, int argc, char **argv)
 {
 	memset (self, 0, sizeof *self);
-	str_map_init (&self->whitelist);
-	str_map_init (&self->blacklist);
+	self->whitelist = str_map_make (NULL);
+	self->blacklist = str_map_make (NULL);
 
 	// Usually this shouldn't pose a problem but let's make it optional
 	self->can_fork = true;
@@ -3854,8 +3832,8 @@ test_init (struct test *self, int argc, char **argv)
 		{ 0, NULL, NULL, 0, NULL }
 	};
 
-	struct opt_handler oh;
-	opt_handler_init (&oh, argc, argv, opts, NULL, "Unit test runner");
+	struct opt_handler oh =
+		opt_handler_make (argc, argv, opts, NULL, "Unit test runner");
 
 	int c;
 	while ((c = opt_handler_get (&oh)) != -1)
@@ -3925,8 +3903,7 @@ test_add_internal (struct test *self, const char *name, size_t fixture_size,
 static bool
 str_map_glob_match (struct str_map *self, const char *entry)
 {
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, self);
+	struct str_map_iter iter = str_map_iter_make (self);
 	while (str_map_iter_next (&iter))
 		if (!fnmatch (iter.link->key, entry, 0))
 			return true;
@@ -4250,7 +4227,7 @@ connector_init (struct connector *self, struct poller *poller)
 	memset (self, 0, sizeof *self);
 	self->poller = poller;
 	self->socket = -1;
-	poller_fd_init (&self->connected_event, poller, self->socket);
+	self->connected_event = poller_fd_make (poller, self->socket);
 	self->connected_event.user_data = self;
 	self->connected_event.dispatcher = (poller_fd_fn) connector_on_ready;
 }
@@ -4527,7 +4504,7 @@ static struct config_item *
 config_item_string (const struct str *s)
 {
 	struct config_item *self = config_item_new (CONFIG_ITEM_STRING);
-	str_init (&self->value.string);
+	self->value.string = str_make ();
 	hard_assert (utf8_validate
 		(self->value.string.str, self->value.string.len));
 	if (s) str_append_str (&self->value.string, s);
@@ -4537,8 +4514,7 @@ config_item_string (const struct str *s)
 static struct config_item *
 config_item_string_from_cstr (const char *s)
 {
-	struct str tmp;
-	str_init (&tmp);
+	struct str tmp = str_make ();
 	str_append (&tmp, s);
 	struct config_item *self = config_item_string (&tmp);
 	str_free (&tmp);
@@ -4557,8 +4533,7 @@ static struct config_item *
 config_item_object (void)
 {
 	struct config_item *self = config_item_new (CONFIG_ITEM_OBJECT);
-	str_map_init (&self->value.object);
-	self->value.object.free = (void (*)(void *)) config_item_destroy;
+	self->value.object = str_map_make ((str_map_free_fn) config_item_destroy);
 	return self;
 }
 
@@ -4628,8 +4603,7 @@ config_item_get (struct config_item *self, const char *path, struct error **e)
 {
 	hard_assert (self->type == CONFIG_ITEM_OBJECT);
 
-	struct strv v;
-	strv_init (&v);
+	struct strv v = strv_make ();
 	cstr_split (path, ".", false, &v);
 
 	struct config_item *result = NULL;
@@ -4768,9 +4742,7 @@ config_item_write_object_innards
 {
 	hard_assert (object->type == CONFIG_ITEM_OBJECT);
 
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, &object->value.object);
-
+	struct str_map_iter iter = str_map_iter_make (&object->value.object);
 	struct config_item *value;
 	while ((value = str_map_iter_next (&iter)))
 		config_item_write_kv_pair (self, iter.link->key, value);
@@ -4845,14 +4817,11 @@ struct config_tokenizer
 };
 
 /// Input has to be null-terminated anyway
-static void
-config_tokenizer_init (struct config_tokenizer *self, const char *p, size_t len)
+static struct config_tokenizer
+config_tokenizer_make (const char *p, size_t len)
 {
-	memset (self, 0, sizeof *self);
-	self->p = p;
-	self->len = len;
-	self->report_line = true;
-	str_init (&self->string);
+	return (struct config_tokenizer)
+		{ .p = p, .len = len, .report_line = true, .string = str_make () };
 }
 
 static void
@@ -4890,8 +4859,7 @@ static void
 config_tokenizer_error (struct config_tokenizer *self,
 	struct error **e, const char *format, ...)
 {
-	struct str description;
-	str_init (&description);
+	struct str description = str_make ();
 
 	va_list ap;
 	va_start (ap, format);
@@ -5108,15 +5076,16 @@ struct config_parser
 	bool replace_token;                 ///< Replace the token
 };
 
-static void
-config_parser_init (struct config_parser *self, const char *script, size_t len)
+static struct config_parser
+config_parser_make (const char *script, size_t len)
 {
-	memset (self, 0, sizeof *self);
-	config_tokenizer_init (&self->tokenizer, script, len);
-
 	// As reading in tokens may cause exceptions, we wait for the first peek()
 	// to replace the initial CONFIG_T_ABORT.
-	self->replace_token = true;
+	return (struct config_parser)
+	{
+		.tokenizer = config_tokenizer_make (script, len),
+		.replace_token = true,
+	};
 }
 
 static void
@@ -5286,9 +5255,7 @@ static struct config_item *
 config_item_parse (const char *script, size_t len,
 	bool single_value_only, struct error **e)
 {
-	struct config_parser parser;
-	config_parser_init (&parser, script, len);
-
+	struct config_parser parser = config_parser_make (script, len);
 	struct config_item *volatile object = NULL;
 	jmp_buf err;
 
@@ -5325,8 +5292,7 @@ static struct config_item *
 config_item_clone (struct config_item *self)
 {
 	// Oh well, it saves code
-	struct str tmp;
-	str_init (&tmp);
+	struct str tmp = str_make ();
 	config_item_write (self, false, &tmp);
 	struct config_item *result =
 		config_item_parse (tmp.str, tmp.len, true, NULL);
@@ -5339,8 +5305,7 @@ config_read_from_file (const char *filename, struct error **e)
 {
 	struct config_item *root = NULL;
 
-	struct str data;
-	str_init (&data);
+	struct str data = str_make ();
 	if (!read_file (filename, &data, e))
 		goto end;
 
@@ -5440,9 +5405,7 @@ config_schema_call_changed (struct config_item *item)
 {
 	if (item->type == CONFIG_ITEM_OBJECT)
 	{
-		struct str_map_iter iter;
-		str_map_iter_init (&iter, &item->value.object);
-
+		struct str_map_iter iter = str_map_iter_make (&item->value.object);
 		struct config_item *child;
 		while ((child = str_map_iter_next (&iter)))
 			config_schema_call_changed (child);
@@ -5478,12 +5441,11 @@ struct config
 	struct config_item *root;           ///< CONFIG_ITEM_OBJECT
 };
 
-static void
-config_init (struct config *self)
+static struct config
+config_make (void)
 {
-	memset (self, 0, sizeof *self);
-	str_map_init (&self->modules);
-	self->modules.free = (str_map_free_fn) config_module_destroy;
+	return (struct config)
+		{ .modules = str_map_make ((str_map_free_fn) config_module_destroy) };
 }
 
 static void
@@ -5514,9 +5476,7 @@ config_load (struct config *self, struct config_item *root)
 		config_item_destroy (self->root);
 	self->root = root;
 
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, &self->modules);
-
+	struct str_map_iter iter = str_map_iter_make (&self->modules);
 	struct config_module *module;
 	while ((module = str_map_iter_next (&iter)))
 	{

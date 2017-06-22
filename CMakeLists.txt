@@ -4,7 +4,8 @@ cmake_minimum_required (VERSION 2.8.5)
 # Moar warnings
 if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUC)
 	# -Wunused-function is pretty annoying here, as everything is static
-	set (CMAKE_C_FLAGS "-std=c99 -Wall -Wextra -Wno-unused-function")
+	set (wdisabled "-Wno-unused-function -Wno-implicit-fallthrough")
+	set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall -Wextra ${wdisabled}")
 endif ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUC)
 
 # Dependencies

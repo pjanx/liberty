@@ -43,8 +43,7 @@ test_irc (void)
 	irc_parse_message (&msg, "@first=a\\:\\s\\r\\n\\\\;2nd "
 		":srv hi there :good m8 :how are you?");
 
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, &msg.tags);
+	struct str_map_iter iter = str_map_iter_make (&msg.tags);
 	soft_assert (msg.tags.len == 2);
 
 	char *value;
@@ -79,8 +78,7 @@ test_irc (void)
 static void
 test_http_parser (void)
 {
-	struct str_map parameters;
-	str_map_init (&parameters);
+	struct str_map parameters = str_map_make (NULL);
 	parameters.key_xfrm = tolower_ascii_strxfrm;
 
 	char *type = NULL;
@@ -135,8 +133,7 @@ test_scgi_parser_on_content (void *user_data, const void *data, size_t len)
 static void
 test_scgi_parser (void)
 {
-	struct scgi_parser parser;
-	scgi_parser_init (&parser);
+	struct scgi_parser parser = scgi_parser_make ();
 	parser.on_headers_read = test_scgi_parser_on_headers_read;
 	parser.on_content      = test_scgi_parser_on_content;
 	parser.user_data       = &parser;
@@ -181,8 +178,7 @@ test_websockets (void)
 	soft_assert (!strcmp (accept, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="));
 	free (accept);
 
-	struct ws_parser parser;
-	ws_parser_init (&parser);
+	struct ws_parser parser = ws_parser_make ();
 	parser.on_frame_header = test_websockets_on_frame_header;
 	parser.on_frame        = test_websockets_on_frame;
 	parser.user_data       = &parser;

@@ -158,9 +158,7 @@ test_list_with_tail (void)
 static void
 test_strv (void)
 {
-	struct strv v;
-	strv_init (&v);
-
+	struct strv v = strv_make ();
 	strv_append_owned (&v, xstrdup ("xkcd"));
 	strv_reset (&v);
 
@@ -168,8 +166,7 @@ test_strv (void)
 		{ "123", "456", "a", "bc", "def", "ghij", "klmno", "pqrstu" };
 
 	// Add the first two items via another vector
-	struct strv w;
-	strv_init (&w);
+	struct strv w = strv_make ();
 	strv_append_args (&w, a[0], a[1], NULL);
 	strv_append_vector (&v, w.vector);
 	strv_free (&w);
@@ -196,15 +193,13 @@ test_str (void)
 {
 	uint8_t x[] = { 0x12, 0x34, 0x56, 0x78, 0x11, 0x22, 0x33, 0x44 };
 
-	struct str s;
-	str_init (&s);
+	struct str s = str_make ();
 	str_reserve (&s, MEGA);
 	str_append_data (&s, x, sizeof x);
 	str_remove_slice (&s, 4, 4);
 	soft_assert (s.len == 4);
 
-	struct str t;
-	str_init (&t);
+	struct str t = str_make ();
 	str_append_str (&t, &s);
 	str_append (&t, "abc");
 	str_append_c (&t, 'd');
@@ -265,10 +260,8 @@ static void
 test_str_map (void)
 {
 	// Put two reference counted objects in the map under case-insensitive keys
-	struct str_map m;
-	str_map_init (&m);
+	struct str_map m = str_map_make (free_counter);
 	m.key_xfrm = tolower_ascii_strxfrm;
-	m.free = free_counter;
 
 	int *a = make_counter ();
 	int *b = make_counter ();
@@ -282,8 +275,7 @@ test_str_map (void)
 	soft_assert (str_map_find (&m, "DEFghi") == b);
 
 	// Check that we can iterate over both of them
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, &m);
+	struct str_map_iter iter = str_map_iter_make (&m);
 
 	bool met_a = false;
 	bool met_b = false;
@@ -310,8 +302,7 @@ test_str_map (void)
 	free_counter (b);
 
 	// Iterator test with a high number of items
-	str_map_init (&m);
-	m.free = free;
+	m = str_map_make (free);
 
 	for (size_t i = 0; i < 100 * 100; i++)
 	{
@@ -319,8 +310,7 @@ test_str_map (void)
 		str_map_set (&m, x, x);
 	}
 
-	struct str_map_unset_iter unset_iter;
-	str_map_unset_iter_init (&unset_iter, &m);
+	struct str_map_unset_iter unset_iter = str_map_unset_iter_make (&m);
 	while ((str_map_unset_iter_next (&unset_iter)))
 	{
 		unsigned long x;
@@ -342,9 +332,7 @@ test_utf8 (void)
 	soft_assert ( utf8_validate (valid,   sizeof valid));
 	soft_assert (!utf8_validate (invalid, sizeof invalid));
 
-	struct utf8_iter iter;
-	utf8_iter_init (&iter, "fóọ");
-
+	struct utf8_iter iter = utf8_iter_make ("fóọ");
 	size_t ch_len;
 	hard_assert (utf8_iter_next (&iter, &ch_len) == 'f'    && ch_len == 1);
 	hard_assert (utf8_iter_next (&iter, &ch_len) == 0x00F3 && ch_len == 2);
@@ -358,8 +346,8 @@ test_base64 (void)
 	for (size_t i = 0; i < N_ELEMENTS (data); i++)
 		data[i] = i;
 
-	struct str encoded;  str_init (&encoded);
-	struct str decoded;  str_init (&decoded);
+	struct str encoded = str_make ();
+	struct str decoded = str_make ();
 
 	base64_encode (data, sizeof data, &encoded);
 	soft_assert (base64_decode (encoded.str, false, &decoded));
@@ -430,9 +418,9 @@ test_async (void)
 {
 	struct test_async_data data;
 	memset (&data, 0, sizeof data);
-	async_manager_init (&data.manager);
+	data.manager = async_manager_make ();
 
-	async_init (&data.busyloop, &data.manager);
+	data.busyloop = async_make (&data.manager);
 	data.busyloop.execute = on_busyloop_execute;
 	data.busyloop.destroy = on_busyloop_destroy;
 	async_run (&data.busyloop);
@@ -542,7 +530,7 @@ test_connector_fixture_init
 
 	// Make it so that we immediately accept all connections
 	poller_init (&self->poller);
-	poller_fd_init (&self->listening_event, &self->poller, self->listening_fd);
+	self->listening_event = poller_fd_make (&self->poller, self->listening_fd);
 	self->listening_event.dispatcher = test_connector_on_client;
 	self->listening_event.user_data = (poller_fd_fn) self;
 	poller_fd_set (&self->listening_event, POLLIN);

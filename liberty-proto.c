@@ -34,9 +34,7 @@ struct irc_message
 static char *
 irc_unescape_message_tag (const char *value)
 {
-	struct str s;
-	str_init (&s);
-
+	struct str s = str_make ();
 	bool escape = false;
 	for (const char *p = value; *p; p++)
 	{
@@ -63,8 +61,7 @@ irc_unescape_message_tag (const char *value)
 static void
 irc_parse_message_tags (const char *tags, struct str_map *out)
 {
-	struct strv v;
-	strv_init (&v);
+	struct strv v = strv_make ();
 	cstr_split (tags, ";", true, &v);
 
 	for (size_t i = 0; i < v.len; i++)
@@ -78,19 +75,16 @@ irc_parse_message_tags (const char *tags, struct str_map *out)
 		else
 			str_map_set (out, key, xstrdup (""));
 	}
-
 	strv_free (&v);
 }
 
 static void
 irc_parse_message (struct irc_message *msg, const char *line)
 {
-	str_map_init (&msg->tags);
-	msg->tags.free = free;
-
+	msg->tags = str_map_make (free);
 	msg->prefix = NULL;
 	msg->command = NULL;
-	strv_init (&msg->params);
+	msg->params = strv_make ();
 
 	// IRC 3.2 message tags
 	if (*line == '@')
@@ -288,14 +282,15 @@ struct http_tokenizer
 	struct str string;                  ///< "token" / "quoted-string" content
 };
 
-static void
-http_tokenizer_init (struct http_tokenizer *self, const char *input, size_t len)
+static struct http_tokenizer
+http_tokenizer_make (const char *input, size_t len)
 {
-	memset (self, 0, sizeof *self);
-	self->input = (const unsigned char *) input;
-	self->input_len = len;
-
-	str_init (&self->string);
+	return (struct http_tokenizer)
+	{
+		.input = (const unsigned char *) input,
+		.input_len = len,
+		.string = str_make (),
+	};
 }
 
 static void
@@ -428,8 +423,8 @@ http_parse_media_type (const char *media_type,
 	char **type, char **subtype, struct str_map *parameters)
 {
 	bool result = false;
-	struct http_tokenizer t;
-	http_tokenizer_init (&t, media_type, strlen (media_type));
+	struct http_tokenizer t =
+		http_tokenizer_make (media_type, strlen (media_type));
 
 	if (http_tokenizer_next (&t, true) != HTTP_T_TOKEN)
 		goto end;
@@ -490,8 +485,7 @@ http_parse_upgrade (const char *upgrade, struct http_protocol **out)
 	struct http_protocol *list = NULL;
 	struct http_protocol *tail = NULL;
 
-	struct http_tokenizer t;
-	http_tokenizer_init (&t, upgrade, strlen (upgrade));
+	struct http_tokenizer t = http_tokenizer_make (upgrade, strlen (upgrade));
 
 	enum {
 		STATE_PROTOCOL_NAME,
@@ -618,16 +612,16 @@ struct scgi_parser
 	void *user_data;                    ///< User data passed to callbacks
 };
 
-static void
-scgi_parser_init (struct scgi_parser *self)
+static struct scgi_parser
+scgi_parser_make (void)
 {
-	memset (self, 0, sizeof *self);
-
-	str_init (&self->input);
-	str_map_init (&self->headers);
-	self->headers.free = free;
-	str_init (&self->name);
-	str_init (&self->value);
+	return (struct scgi_parser)
+	{
+		.input = str_make (),
+		.headers = str_map_make (free),
+		.name = str_make (),
+		.value = str_make (),
+	};
 }
 
 static void
@@ -728,7 +722,7 @@ scgi_parser_push (struct scgi_parser *self,
 				self->name.str, str_steal (&self->value));
 
 			str_reset (&self->name);
-			str_init (&self->value);
+			self->value = str_make ();
 
 			self->state = SCGI_READING_NAME;
 		}
@@ -827,12 +821,11 @@ struct fcgi_parser
 	void *user_data;                    ///< User data
 };
 
-static void
-fcgi_parser_init (struct fcgi_parser *self)
+static struct fcgi_parser
+fcgi_parser_make (void)
 {
-	memset (self, 0, sizeof *self);
-	str_init (&self->input);
-	str_init (&self->content);
+	return (struct fcgi_parser)
+		{ .input = str_make (), .content = str_make () };
 }
 
 static void
@@ -845,8 +838,8 @@ fcgi_parser_free (struct fcgi_parser *self)
 static void
 fcgi_parser_unpack_header (struct fcgi_parser *self)
 {
-	struct msg_unpacker unpacker;
-	msg_unpacker_init (&unpacker, self->input.str, self->input.len);
+	struct msg_unpacker unpacker =
+		msg_unpacker_make (self->input.str, self->input.len);
 
 	bool success = true;
 	uint8_t reserved;
@@ -928,11 +921,10 @@ struct fcgi_nv_parser
 	char *value;                        ///< The current value, 0-terminated
 };
 
-static void
-fcgi_nv_parser_init (struct fcgi_nv_parser *self)
+static struct fcgi_nv_parser
+fcgi_nv_parser_make (void)
 {
-	memset (self, 0, sizeof *self);
-	str_init (&self->input);
+	return (struct fcgi_nv_parser) { .input = str_make () };
 }
 
 static void
@@ -951,8 +943,8 @@ fcgi_nv_parser_push (struct fcgi_nv_parser *self, const void *data, size_t len)
 
 	while (true)
 	{
-		struct msg_unpacker unpacker;
-		msg_unpacker_init (&unpacker, self->input.str, self->input.len);
+		struct msg_unpacker unpacker =
+			msg_unpacker_make (self->input.str, self->input.len);
 
 	switch (self->state)
 	{
@@ -1049,8 +1041,7 @@ fcgi_nv_convert_len (size_t len, struct str *output)
 static void
 fcgi_nv_convert (struct str_map *map, struct str *output)
 {
-	struct str_map_iter iter;
-	str_map_iter_init (&iter, map);
+	struct str_map_iter iter = str_map_iter_make (map);
 	while (str_map_iter_next (&iter))
 	{
 		const char *name  = iter.link->key;
@@ -1089,8 +1080,7 @@ ws_encode_response_key (const char *key)
 	SHA1 ((unsigned char *) response_key, strlen (response_key), hash);
 	free (response_key);
 
-	struct str base64;
-	str_init (&base64);
+	struct str base64 = str_make ();
 	base64_encode (hash, sizeof hash, &base64);
 	return str_steal (&base64);
 }
@@ -1168,11 +1158,10 @@ struct ws_parser
 	void *user_data;                    ///< User data for callbacks
 };
 
-static void
-ws_parser_init (struct ws_parser *self)
+static struct ws_parser
+ws_parser_make (void)
 {
-	memset (self, 0, sizeof *self);
-	str_init (&self->input);
+	return (struct ws_parser) { .input = str_make () };
 }
 
 static void
@@ -1213,8 +1202,8 @@ ws_parser_push (struct ws_parser *self, const void *data, size_t len)
 	bool success = false;
 	str_append_data (&self->input, data, len);
 
-	struct msg_unpacker unpacker;
-	msg_unpacker_init (&unpacker, self->input.str, self->input.len);
+	struct msg_unpacker unpacker =
+		msg_unpacker_make (self->input.str, self->input.len);
 
 	while (true)
 	switch (self->state)
@@ -1275,7 +1264,7 @@ ws_parser_push (struct ws_parser *self, const void *data, size_t len)
 	case WS_PARSER_PAYLOAD:
 		// Move the buffer so that payload data is at the front
 		str_remove_slice (&self->input, 0, unpacker.offset);
-		msg_unpacker_init (&unpacker, self->input.str, self->input.len);
+		unpacker = msg_unpacker_make (self->input.str, self->input.len);
 
 		if (self->input.len < self->payload_len)
 			goto need_data;
@@ -1418,21 +1407,19 @@ struct mpd_client
 static void mpd_client_reset (struct mpd_client *self);
 static void mpd_client_destroy_connector (struct mpd_client *self);
 
-static void
-mpd_client_init (struct mpd_client *self, struct poller *poller)
+static struct mpd_client
+mpd_client_make (struct poller *poller)
 {
-	memset (self, 0, sizeof *self);
-
-	self->poller = poller;
-	self->socket = -1;
-
-	str_init (&self->read_buffer);
-	str_init (&self->write_buffer);
-
-	strv_init (&self->data);
-
-	poller_fd_init (&self->socket_event, poller, -1);
-	poller_timer_init (&self->timeout_timer, poller);
+	return (struct mpd_client)
+	{
+		.poller = poller,
+		.socket = -1,
+		.read_buffer = str_make (),
+		.write_buffer = str_make (),
+		.data = strv_make (),
+		.socket_event = poller_fd_make (poller, -1),
+		.timeout_timer = poller_timer_make (poller),
+	};
 }
 
 static void
@@ -1707,9 +1694,7 @@ mpd_client_send_commandv (struct mpd_client *self, char **commands)
 		mpd_client_send_command (self, "noidle", NULL);
 	}
 
-	struct str line;
-	str_init (&line);
-
+	struct str line = str_make ();
 	for (; *commands; commands++)
 	{
 		if (line.len)
@@ -1734,8 +1719,7 @@ mpd_client_send_commandv (struct mpd_client *self, char **commands)
 static void
 mpd_client_send_command (struct mpd_client *self, const char *command, ...)
 {
-	struct strv v;
-	strv_init (&v);
+	struct strv v = strv_make ();
 
 	va_list ap;
 	va_start (ap, command);
@@ -1835,9 +1819,7 @@ mpd_client_idle (struct mpd_client *self, unsigned subsystems)
 {
 	hard_assert (!self->in_list);
 
-	struct strv v;
-	strv_init (&v);
-
+	struct strv v = strv_make ();
 	strv_append (&v, "idle");
 	for (size_t i = 0; i < N_ELEMENTS (mpd_subsystem_names); i++)
 		if (subsystems & (1 << i))
@@ -1864,7 +1846,7 @@ mpd_client_finish_connection (struct mpd_client *self, int socket)
 	self->socket = socket;
 	self->state = MPD_CONNECTED;
 
-	poller_fd_init (&self->socket_event, self->poller, self->socket);
+	self->socket_event = poller_fd_make (self->poller, self->socket);
 	self->socket_event.dispatcher = mpd_client_on_ready;
 	self->socket_event.user_data = self;
 

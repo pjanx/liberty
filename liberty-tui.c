@@ -61,8 +61,7 @@ struct attrs
 static struct attrs
 attrs_decode (const char *value)
 {
-	struct strv v;
-	strv_init (&v);
+	struct strv v = strv_make ();
 	cstr_split (value, " ", true, &v);
 
 	int colors = 0;
@@ -110,11 +109,12 @@ struct row_buffer
 	int total_width;                    ///< Total width of all characters
 };
 
-static void
-row_buffer_init (struct row_buffer *self)
+static struct row_buffer
+row_buffer_make (void)
 {
-	memset (self, 0, sizeof *self);
-	ARRAY_INIT_SIZED (self->chars, 256);
+	struct row_buffer self = {};
+	ARRAY_INIT_SIZED (self.chars, 256);
+	return self;
 }
 
 static void
