@@ -1681,8 +1681,9 @@ mpd_client_add_task
 static void mpd_client_send_command
 	(struct mpd_client *self, const char *command, ...) ATTRIBUTE_SENTINEL;
 
+/// Avoid calling this method directly if you don't want things to explode
 static void
-mpd_client_send_commandv (struct mpd_client *self, char **commands)
+mpd_client_send_command_raw (struct mpd_client *self, const char *raw)
 {
 	// Automatically interrupt idle mode
 	if (self->idling)
@@ -1694,26 +1695,31 @@ mpd_client_send_commandv (struct mpd_client *self, char **commands)
 		mpd_client_send_command (self, "noidle", NULL);
 	}
 
+	if (self->on_io_hook)
+		self->on_io_hook (self->user_data, true, raw);
+
+	str_append (&self->write_buffer, raw);
+	str_append_c (&self->write_buffer, '\n');
+
+	mpd_client_update_poller (self);
+}
+
+static void
+mpd_client_send_commandv (struct mpd_client *self, char **fields)
+{
 	struct str line = str_make ();
-	for (; *commands; commands++)
+	for (; *fields; fields++)
 	{
 		if (line.len)
 			str_append_c (&line, ' ');
 
-		if (mpd_client_must_quote (*commands))
-			mpd_client_quote (*commands, &line);
+		if (mpd_client_must_quote (*fields))
+			mpd_client_quote (*fields, &line);
 		else
-			str_append (&line, *commands);
+			str_append (&line, *fields);
 	}
-
-	if (self->on_io_hook)
-		self->on_io_hook (self->user_data, true, line.str);
-
-	str_append_c (&line, '\n');
-	str_append_str (&self->write_buffer, &line);
+	mpd_client_send_command_raw (self, line.str);
 	str_free (&line);
-
-	mpd_client_update_poller (self);
 }
 
 static void
