@@ -14,7 +14,7 @@ fakeroot sh -e <<-EOF
 	url = $url
 	builddate = \`date -u +%s\`
 	packager = $author
-	size = \`du -sb --apparent-size | cut -f1\`
+	size = \`du -sb | cut -f1\`
 	arch = $arch
 	END
 	cd "$wd" && tar cJf "../$target" .PKGINFO *
