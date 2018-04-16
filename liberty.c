@@ -4337,6 +4337,32 @@ socket_io_try_write (int socket_fd, struct str *wb)
 // This is a more powerful configuration format, adding key-value maps and
 // simplifying item validation and dynamic handling of changes.  All strings
 // must be encoded in UTF-8.
+//
+// The syntax is roughly described by the following parsing expression grammar:
+//
+//   config  = entries eof  # as if there were implicit curly braces around
+//   entries = (newline* pair)* newline*
+//   pair    = key newline* lws '=' newline* value (&endobj / newline / eof)
+//   key     = string / !null !boolean lws [A-Za-z_][0-9A-Za-z_]*
+//   value   = object / string / integer / null / boolean
+//
+//   object  = lws '{' entries endobj
+//   endobj  = lws '}'
+//
+//   string  = lws '"' ('\\' escape / ![\\"] char)* '"'
+//   char    = [\0-\177]  # or any Unicode codepoint in the UTF-8 encoding
+//   escape  = [\\"abfnrtv] / [xX][0-9A-Fa-f][0-9A-Fa-f]? / [0-7][0-7]?[0-7]?
+//
+//   integer = lws '-'? [0-9]+  # whatever strtoll() accepts on your system
+//   null    = lws 'null'
+//   boolean = lws 'yes'  / lws 'YES'  / lws 'no'    / lws 'NO'
+//           / lws 'on'   / lws 'ON'   / lws 'off'   / lws 'OFF'
+//           / lws 'true' / lws 'TRUE' / lws 'false' / lws 'FALSE'
+//
+//   newline = lws comment? '\n'
+//   eof     = lws comment? !.
+//   lws     = [ \t\r]*  # linear whitespace (plus CR as it is insignificant)
+//   comment = '#' (!'\n' .)*
 
 enum config_item_type
 {
