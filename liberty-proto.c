@@ -213,6 +213,7 @@ irc_fnmatch (const char *pattern, const char *string)
 	char x_pattern[pattern_size], x_string[string_size];
 	irc_strxfrm (x_pattern, pattern, pattern_size);
 	irc_strxfrm (x_string,  string,  string_size);
+	// FIXME: this supports [], which is not mentioned in RFC 2812
 	return fnmatch (x_pattern, x_string, 0);
 }
 
@@ -1188,8 +1189,10 @@ ws_parser_unmask (char *payload, uint64_t len, uint32_t mask)
 	{
 	case 3:
 		payload[end + 2] ^= (mask >>  8) & 0xFF;
+		// Fall-through
 	case 2:
 		payload[end + 1] ^= (mask >> 16) & 0xFF;
+		// Fall-through
 	case 1:
 		payload[end    ] ^= (mask >> 24) & 0xFF;
 	}
@@ -1738,6 +1741,8 @@ mpd_client_send_command (struct mpd_client *self, const char *command, ...)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+/// "On success for all commands, OK is returned.  If a command fails, no more
+/// commands are executed and the appropriate ACK error is returned"
 static void
 mpd_client_list_begin (struct mpd_client *self)
 {
