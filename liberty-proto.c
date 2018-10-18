@@ -792,7 +792,8 @@ enum fcgi_protocol_status
 
 struct fcgi_parser;
 
-typedef void (*fcgi_message_fn)
+/// Message handler, returns false if further processing should be stopped
+typedef bool (*fcgi_message_fn)
 	(const struct fcgi_parser *parser, void *user_data);
 
 enum fcgi_parser_state
@@ -854,7 +855,7 @@ fcgi_parser_unpack_header (struct fcgi_parser *self)
 	str_remove_slice (&self->input, 0, unpacker.offset);
 }
 
-static void
+static bool
 fcgi_parser_push (struct fcgi_parser *self, const void *data, size_t len)
 {
 	// This could be made considerably faster for high-throughput applications
@@ -866,14 +867,14 @@ fcgi_parser_push (struct fcgi_parser *self, const void *data, size_t len)
 	{
 	case FCGI_READING_HEADER:
 		if (self->input.len < FCGI_HEADER_LEN)
-			return;
+			return true;
 
 		fcgi_parser_unpack_header (self);
 		self->state = FCGI_READING_CONTENT;
 		break;
 	case FCGI_READING_CONTENT:
 		if (self->input.len < self->content_length)
-			return;
+			return true;
 
 		// Move an appropriate part of the input buffer to the content buffer
 		str_reset (&self->content);
@@ -883,10 +884,11 @@ fcgi_parser_push (struct fcgi_parser *self, const void *data, size_t len)
 		break;
 	case FCGI_READING_PADDING:
 		if (self->input.len < self->padding_length)
-			return;
+			return true;
 
 		// Call the callback to further process the message
-		self->on_message (self, self->user_data);
+		if (!self->on_message (self, self->user_data))
+			return false;
 
 		// Remove the padding from the input buffer
 		str_remove_slice (&self->input, 0, self->padding_length);

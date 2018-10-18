@@ -1093,7 +1093,7 @@ struct async
 	LIST_HEADER (struct async)
 	struct async_manager *manager;      ///< Our manager object
 
-	// "cancelled" may not be accesed or modified by the worker thread
+	// "cancelled" may not be accessed or modified by the worker thread
 
 	pthread_t worker;                   ///< Worker thread ID
 	bool started;                       ///< Worker thread ID is valid
