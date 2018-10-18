@@ -664,10 +664,11 @@ scgi_parser_push (struct scgi_parser *self,
 		if (digit == ':')
 		{
 			self->state = SCGI_READING_NAME;
+			str_remove_slice (&self->input, 0, 1);
 			break;
 		}
 
-		if (digit < '0' || digit >= '9')
+		if (digit < '0' || digit > '9')
 			return error_set (e, "invalid header netstring");
 
 		size_t new_len = self->headers_len * 10 + (digit - '0');
@@ -700,6 +701,7 @@ scgi_parser_push (struct scgi_parser *self,
 			self->state = SCGI_READING_VALUE;
 
 		str_remove_slice (&self->input, 0, 1);
+		self->headers_len--;
 		break;
 	}
 	case SCGI_READING_VALUE:
@@ -728,6 +730,7 @@ scgi_parser_push (struct scgi_parser *self,
 		}
 
 		str_remove_slice (&self->input, 0, 1);
+		self->headers_len--;
 		break;
 	}
 	case SCGI_READING_CONTENT:

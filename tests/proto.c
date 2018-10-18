@@ -105,10 +105,20 @@ test_http_parser (void)
 		http_protocol_destroy (iter);
 }
 
+struct scgi_fixture
+{
+	struct scgi_parser parser;
+	bool seen_headers;
+	bool seen_content;
+};
+
 static bool
 test_scgi_parser_on_headers_read (void *user_data)
 {
-	struct scgi_parser *parser = user_data;
+	struct scgi_fixture *fixture = user_data;
+	struct scgi_parser *parser = &fixture->parser;
+	fixture->seen_headers = true;
+
 	soft_assert (parser->headers.len == 4);
 	soft_assert (!strcmp (str_map_find (&parser->headers,
 		"CONTENT_LENGTH"), "27"));
@@ -124,7 +134,9 @@ test_scgi_parser_on_headers_read (void *user_data)
 static bool
 test_scgi_parser_on_content (void *user_data, const void *data, size_t len)
 {
-	(void) user_data;
+	struct scgi_fixture *fixture = user_data;
+	fixture->seen_content = true;
+
 	soft_assert (!strncmp (data, "What is the answer to life?", len));
 	return true;
 }
@@ -132,10 +144,12 @@ test_scgi_parser_on_content (void *user_data, const void *data, size_t len)
 static void
 test_scgi_parser (void)
 {
-	struct scgi_parser parser = scgi_parser_make ();
-	parser.on_headers_read = test_scgi_parser_on_headers_read;
-	parser.on_content      = test_scgi_parser_on_content;
-	parser.user_data       = &parser;
+	struct scgi_fixture fixture = { scgi_parser_make(), false, false };
+	struct scgi_parser *parser = &fixture.parser;
+
+	parser->on_headers_read = test_scgi_parser_on_headers_read;
+	parser->on_content      = test_scgi_parser_on_content;
+	parser->user_data       = &fixture;
 
 	// This is an example straight from the specification
 	const char example[] =
@@ -147,8 +161,9 @@ test_scgi_parser (void)
 		","
 		"What is the answer to life?";
 
-	soft_assert (scgi_parser_push (&parser, example, sizeof example, NULL));
-	scgi_parser_free (&parser);
+	soft_assert (scgi_parser_push (parser, example, sizeof example, NULL));
+	soft_assert (fixture.seen_headers && fixture.seen_content);
+	scgi_parser_free (parser);
 }
 
 static bool
