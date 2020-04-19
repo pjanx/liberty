@@ -5254,7 +5254,9 @@ static struct config_item *
 config_item_parse (const char *script, size_t len,
 	bool single_value_only, struct error **e)
 {
-	struct config_parser parser = config_parser_make (script, len);
+	volatile struct config_parser parser = config_parser_make (script, len);
+	struct config_parser *volatile self = (struct config_parser *) &parser;
+
 	struct config_item *volatile object = NULL;
 	jmp_buf err;
 
@@ -5276,13 +5278,13 @@ config_item_parse (const char *script, size_t len,
 		// This is really only intended for in-program configuration
 		// and telling the line number would look awkward
 		parser.tokenizer.report_line = false;
-		object = config_parser_parse_value (&parser, err);
+		object = config_parser_parse_value (self, err);
 	}
 	else
-		object = config_parser_parse_object (&parser, err);
-	config_parser_expect (&parser, CONFIG_T_ABORT, err);
+		object = config_parser_parse_object (self, err);
+	config_parser_expect (self, CONFIG_T_ABORT, err);
 end:
-	config_parser_free (&parser);
+	config_parser_free (self);
 	return object;
 }
 
