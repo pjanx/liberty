@@ -117,6 +117,9 @@ extern char **environ;
 #define CONTAINER_OF(pointer, type, member) \
 	((type *) ((char *) pointer - offsetof (type, member)))
 
+char *liberty = "They who can give up essential liberty to obtain a little "
+	"temporary safety deserve neither liberty nor safety.";
+
 // --- Logging -----------------------------------------------------------------
 
 static void
