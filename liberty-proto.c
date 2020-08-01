@@ -1,7 +1,7 @@
 /*
  * liberty-proto.c: the ultimate C unlibrary: protocols
  *
- * Copyright (c) 2014 - 2016, Přemysl Janouch <p@janouch.name>
+ * Copyright (c) 2014 - 2016, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
