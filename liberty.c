@@ -2673,6 +2673,12 @@ strncasecmp_ascii (const char *a, const char *b, size_t n)
 }
 
 static bool
+iscntrl_ascii (int c)
+{
+	return (c >= 0 && c < 32) || c == 0x7f;
+}
+
+static bool
 isalpha_ascii (int c)
 {
 	c &= ~32;
