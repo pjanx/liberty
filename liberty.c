@@ -731,6 +731,21 @@ set_blocking (int fd, bool blocking)
 	return prev;
 }
 
+static bool
+xwrite (int fd, const char *data, size_t len, struct error **e)
+{
+	size_t written = 0;
+	while (written < len)
+	{
+		ssize_t res = write (fd, data + written, len - written);
+		if (res >= 0)
+			written += res;
+		else if (errno != EINTR)
+			return error_set (e, "%s", strerror (errno));
+	}
+	return true;
+}
+
 static void
 xclose (int fd)
 {
@@ -2925,6 +2940,13 @@ base64_encode (const void *data, size_t len, struct str *output)
 // --- Utilities ---------------------------------------------------------------
 
 static void
+cstr_set (char **s, char *new)
+{
+	free (*s);
+	*s = new;
+}
+
+static void
 cstr_split (const char *s, const char *delimiters, bool ignore_empty,
 	struct strv *out)
 {
@@ -3263,16 +3285,8 @@ resolve_relative_data_filename (const char *filename)
 }
 
 static char *
-resolve_relative_runtime_filename (const char *filename)
+resolve_relative_runtime_filename_finish (struct str path)
 {
-	struct str path = str_make ();
-	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
-	if (runtime_dir && *runtime_dir == '/')
-		str_append (&path, runtime_dir);
-	else
-		get_xdg_home_dir (&path, "XDG_DATA_HOME", ".local/share");
-	str_append_printf (&path, "/%s/%s", PROGRAM_NAME, filename);
-
 	// Try to create the file's ancestors;
 	// typically the user will want to immediately create a file in there
 	const char *last_slash = strrchr (path.str, '/');
@@ -3283,6 +3297,41 @@ resolve_relative_runtime_filename (const char *filename)
 		free (copy);
 	}
 	return str_steal (&path);
+}
+
+static char *
+resolve_relative_runtime_filename (const char *filename)
+{
+	struct str path = str_make ();
+	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
+	if (runtime_dir && *runtime_dir == '/')
+		str_append (&path, runtime_dir);
+	else
+		get_xdg_home_dir (&path, "XDG_DATA_HOME", ".local/share");
+
+	str_append_printf (&path, "/%s/%s", PROGRAM_NAME, filename);
+	return resolve_relative_runtime_filename_finish (path);
+}
+
+/// This differs from resolve_relative_runtime_filename() in that we expect
+/// the filename to be something like a pattern for mkstemp(), so the resulting
+/// path can reside in a system-wide directory with no risk of a conflict.
+/// However, we have to take care about permissions.  Do we even need this?
+static char *
+resolve_relative_runtime_template (const char *template)
+{
+	struct str path = str_make ();
+	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
+	const char *tmpdir = getenv ("TMPDIR");
+	if (runtime_dir && *runtime_dir == '/')
+		str_append_printf (&path, "%s/%s", runtime_dir, PROGRAM_NAME);
+	else if (tmpdir && *tmpdir == '/')
+		str_append_printf (&path, "%s/%s.%d", tmpdir, PROGRAM_NAME, geteuid ());
+	else
+		str_append_printf (&path, "/tmp/%s.%d", PROGRAM_NAME, geteuid ());
+
+	str_append_printf (&path, "/%s", template);
+	return resolve_relative_runtime_filename_finish (path);
 }
 
 static char *
