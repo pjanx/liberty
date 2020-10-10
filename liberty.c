@@ -2953,10 +2953,10 @@ cstr_strip_in_place (char *s, const char *stripped_chars)
 }
 
 static void
-cstr_transform (char *s, int (*tolower) (int c))
+cstr_transform (char *s, int (*xform) (int c))
 {
 	for (; *s; s++)
-		*s = tolower (*s);
+		*s = xform (*s);
 }
 
 static char *
