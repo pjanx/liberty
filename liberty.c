@@ -1357,6 +1357,7 @@ struct poller_idle
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+// The heap could definitely be made faster but we'll prefer simplicity
 struct poller_timers
 {
 	struct poller_timer **heap;         ///< Min-heap of timers
@@ -3002,6 +3003,7 @@ iconv_xstrdup (iconv_t conv, char *in, size_t in_len, size_t *out_len)
 
 	char *in_ptr = in;
 	if (in_len == (size_t) -1)
+		// XXX: out_len will be one character longer than the string!
 		in_len = strlen (in) + 1;
 
 	while (iconv (conv, (char **) &in_ptr, &in_len,
