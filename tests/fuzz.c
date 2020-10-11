@@ -32,6 +32,13 @@
 #define LIBERTY_WANT_PROTO_MPD
 
 #include "../liberty.c"
+#include "../liberty-tui.c"
+
+static bool
+app_is_character_in_locale (ucs4_t ch)
+{
+	return ch < 128;
+}
 
 // --- UTF-8 -------------------------------------------------------------------
 
@@ -46,9 +53,14 @@ test_utf8_validate (const uint8_t *data, size_t size)
 static void
 test_base64_decode (const uint8_t *data, size_t size)
 {
+	struct str wrap = str_make ();
+	str_append_data (&wrap, data, size);
+
 	struct str out = str_make ();
-	base64_decode ((const char *) data, size, &out);
+	base64_decode (wrap.str, true /* ignore_ws */, &out);
 	str_free (&out);
+
+	str_free (&wrap);
 }
 
 // --- IRC ---------------------------------------------------------------------
@@ -131,7 +143,7 @@ test_scgi_parser_push (const uint8_t *data, size_t size)
 // --- WebSockets --------------------------------------------------------------
 
 static bool
-test_websockets_on_frame_header (void *user_data, const struct ws_parser *self)
+test_ws_parser_on_frame_header (void *user_data, const struct ws_parser *self)
 {
 	(void) user_data;
 	(void) self;
@@ -139,7 +151,7 @@ test_websockets_on_frame_header (void *user_data, const struct ws_parser *self)
 }
 
 static bool
-test_websockets_on_frame (void *user_data, const struct ws_parser *self)
+test_ws_parser_on_frame (void *user_data, const struct ws_parser *self)
 {
 	(void) user_data;
 	(void) self;
@@ -150,11 +162,82 @@ static void
 test_ws_parser_push (const uint8_t *data, size_t size)
 {
 	struct ws_parser parser = ws_parser_make ();
-	parser.on_frame_header = test_websockets_on_frame_header;
-	parser.on_frame        = test_websockets_on_frame;
+	parser.on_frame_header = test_ws_parser_on_frame_header;
+	parser.on_frame        = test_ws_parser_on_frame;
 
 	ws_parser_push (&parser, data, size);
 	ws_parser_free (&parser);
+}
+
+// --- FastCGI -----------------------------------------------------------------
+
+static bool
+test_fcgi_parser_on_message (const struct fcgi_parser *parser, void *user_data)
+{
+	(void) parser;
+	(void) user_data;
+	return true;
+}
+
+static void
+test_fcgi_parser_push (const uint8_t *data, size_t size)
+{
+	struct fcgi_parser parser = fcgi_parser_make ();
+	parser.on_message = test_fcgi_parser_on_message;
+	fcgi_parser_push (&parser, data, size);
+	fcgi_parser_free (&parser);
+}
+
+static void
+test_fcgi_nv_parser_push (const uint8_t *data, size_t size)
+{
+	struct str_map values = str_map_make (free);
+	struct fcgi_nv_parser nv_parser = fcgi_nv_parser_make ();
+	nv_parser.output = &values;
+
+	fcgi_nv_parser_push (&nv_parser, data, size);
+	fcgi_nv_parser_free (&nv_parser);
+	str_map_free (&values);
+}
+
+// --- Config ------------------------------------------------------------------
+
+static void
+test_config_item_parse (const uint8_t *data, size_t size)
+{
+	struct config_item *item =
+		config_item_parse ((const char *) data, size, false, NULL);
+	if (item)
+		config_item_destroy (item);
+}
+
+// --- TUI ---------------------------------------------------------------------
+
+static void
+test_attrs_decode (const uint8_t *data, size_t size)
+{
+	struct str wrap = str_make ();
+	str_append_data (&wrap, data, size);
+
+	attrs_decode (wrap.str);
+
+	str_free (&wrap);
+}
+
+// --- MPD ---------------------------------------------------------------------
+
+static void
+test_mpd_client_process_input (const uint8_t *data, size_t size)
+{
+	struct poller poller;
+	poller_init (&poller);
+
+	struct mpd_client mpd = mpd_client_make (&poller);
+	str_append_data (&mpd.read_buffer, data, size);
+	mpd_client_process_input (&mpd);
+	mpd_client_free (&mpd);
+
+	poller_free (&poller);
 }
 
 // --- Main --------------------------------------------------------------------
@@ -180,7 +263,11 @@ LLVMFuzzerInitialize (int *argcp, char ***argvp)
 	REGISTER (http_parse_upgrade)
 	REGISTER (scgi_parser_push)
 	REGISTER (ws_parser_push)
-	// TODO: add more parsers/processors
+	REGISTER (fcgi_parser_push)
+	REGISTER (fcgi_nv_parser_push)
+	REGISTER (config_item_parse)
+	REGISTER (attrs_decode)
+	REGISTER (mpd_client_process_input)
 
 	char **argv = *argvp, *option = "-test=", *name = NULL;
 	for (int i = 1; i < *argcp; i++)
