@@ -5087,18 +5087,21 @@ config_tokenizer_next (struct config_tokenizer *self, struct error **e)
 		return CONFIG_T_STRING;
 	}
 
-	char *end;
+	// Our input doesn't need to be NUL-terminated but we want to use strtoll()
+	char buf[48] = "", *end = buf;
+	size_t buf_len = MIN (sizeof buf - 1, self->len);
+
 	errno = 0;
-	self->integer = strtoll (self->p, &end, 10);
+	self->integer = strtoll (strncpy (buf, self->p, buf_len), &end, 10);
 	if (errno == ERANGE)
 	{
 		config_tokenizer_error (self, e, "integer out of range");
 		return CONFIG_T_ABORT;
 	}
-	if (end != self->p)
+	if (end != buf)
 	{
-		self->len -= end - self->p;
-		self->p = end;
+		self->len -= end - buf;
+		self->p += end - buf;
 		return CONFIG_T_INTEGER;
 	}
 
@@ -5111,7 +5114,7 @@ config_tokenizer_next (struct config_tokenizer *self, struct error **e)
 	str_reset (&self->string);
 	do
 		str_append_c (&self->string, config_tokenizer_advance (self));
-	while (config_tokenizer_is_word_char (*self->p));
+	while (self->len && config_tokenizer_is_word_char (*self->p));
 
 	if (!strcmp (self->string.str, "null"))
 		return CONFIG_T_NULL;
