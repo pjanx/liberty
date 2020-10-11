@@ -604,6 +604,78 @@ test_connector (const void *user_data, struct test_connector_fixture *self)
 	connector_free (&connector);
 }
 
+// --- Configuration -----------------------------------------------------------
+
+static void
+on_test_config_foo_change (struct config_item *item)
+{
+	*(bool *) item->user_data = item->value.boolean;
+}
+
+static bool
+test_config_validate_nonnegative
+	(const struct config_item *item, struct error **e)
+{
+	if (item->type == CONFIG_ITEM_NULL)
+		return true;
+
+	hard_assert (item->type == CONFIG_ITEM_INTEGER);
+	if (item->value.integer >= 0)
+		return true;
+
+	error_set (e, "must be non-negative");
+	return false;
+}
+
+static struct config_schema g_config_test[] =
+{
+	{ .name      = "foo",
+	  .comment   = "baz",
+	  .type      = CONFIG_ITEM_BOOLEAN,
+	  .default_  = "off",
+	  .on_change = on_test_config_foo_change },
+	{ .name      = "bar",
+	  .type      = CONFIG_ITEM_INTEGER,
+	  .validate  = test_config_validate_nonnegative,
+	  .default_  = "1" },
+	{ .name      = "foobar",
+	  .type      = CONFIG_ITEM_STRING,
+	  .default_  = "\"qux\\x01\"" },
+	{}
+};
+
+static void
+test_config_load (struct config_item *subtree, void *user_data)
+{
+	config_schema_apply_to_object (g_config_test, subtree, user_data);
+}
+
+static void
+test_config (void)
+{
+	struct config config = config_make ();
+
+	bool b = true;
+	config_register_module (&config, "top", test_config_load, &b);
+	config_load (&config, config_item_object ());
+	config_schema_call_changed (config.root);
+	hard_assert (b == false);
+
+	struct config_item *invalid = config_item_integer (-1);
+	hard_assert (!config_item_set_from (config_item_get (config.root,
+		"top.bar", NULL), invalid, NULL));
+	config_item_destroy (invalid);
+
+	struct str s = str_make ();
+	config_item_write (config.root, true, &s);
+	struct config_item *parsed = config_item_parse (s.str, s.len, false, NULL);
+	hard_assert (parsed);
+	config_item_destroy (parsed);
+	str_free (&s);
+
+	config_free (&config);
+}
+
 // --- Main --------------------------------------------------------------------
 
 int
@@ -622,6 +694,7 @@ main (int argc, char *argv[])
 	test_add_simple (&test, "/utf-8",          NULL, test_utf8);
 	test_add_simple (&test, "/base64",         NULL, test_base64);
 	test_add_simple (&test, "/async",          NULL, test_async);
+	test_add_simple (&test, "/config",         NULL, test_config);
 
 	test_add (&test, "/connector", struct test_connector_fixture, NULL,
 		test_connector_fixture_init,
