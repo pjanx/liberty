@@ -1,0 +1,18 @@
+#!/bin/sh
+# I'm not sure how to make maximum use of this invention
+# Make sure to have llvm-symbolizer installed
+clang -g -fsanitize=address,undefined,fuzzer -fno-sanitize-recover=all \
+	tests/fuzz.c -o fuzz-executor
+
+fuzz () {
+	echo "`tput bold`-- Fuzzing $1`tput sgr0`"
+	mkdir -p /tmp/corpus-$1
+	./fuzz-executor -test=$1 -artifact_prefix=$1- \
+		-max_len=32 -max_total_time=600 -timeout=1 /tmp/corpus-$1
+}
+
+if [ $# -gt 0 ]; then
+	for test in "$@"; do fuzz $test; done
+else
+	for test in $(./fuzz-executor); do fuzz $test; done
+fi

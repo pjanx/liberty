@@ -77,7 +77,7 @@ test_irc (void)
 static void
 test_http_parser (void)
 {
-	struct str_map parameters = str_map_make (NULL);
+	struct str_map parameters = str_map_make (free);
 	parameters.key_xfrm = tolower_ascii_strxfrm;
 
 	char *type = NULL;
@@ -88,9 +88,11 @@ test_http_parser (void)
 	soft_assert (!strcasecmp_ascii (subtype, "html"));
 	soft_assert (parameters.len == 1);
 	soft_assert (!strcmp (str_map_find (&parameters, "charset"), "utf-8"));
+	free (type);
+	free (subtype);
 	str_map_free (&parameters);
 
-	struct http_protocol *protocols;
+	struct http_protocol *protocols = NULL;
 	soft_assert (http_parse_upgrade ("websocket, HTTP/2.0, , ", &protocols));
 
 	soft_assert (!strcmp (protocols->name, "websocket"));
