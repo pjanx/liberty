@@ -1567,13 +1567,12 @@ mpd_client_parse_line (struct mpd_client *self, const char *line)
 	if (!strcmp (line, "list_OK"))
 		strv_append_owned (&self->data, NULL);
 	else if (mpd_client_parse_response (line, &response))
-	{
 		mpd_client_dispatch (self, &response);
-		free (response.current_command);
-		free (response.message_text);
-	}
 	else
 		strv_append (&self->data, line);
+
+	free (response.current_command);
+	free (response.message_text);
 	return true;
 }
 
