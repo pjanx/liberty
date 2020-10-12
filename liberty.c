@@ -2722,63 +2722,59 @@ isspace_ascii (int c)
 
 // --- UTF-8 -------------------------------------------------------------------
 
-/// Return a pointer to the next UTF-8 character, or NULL on error
-static const char *
-utf8_next (const char *s, size_t len, int32_t *codepoint)
+/// Return the value of the UTF-8 character at `*s` and advance the pointer
+/// to the next one.  Returns -2 if there is only a partial but possibly valid
+/// character sequence, or -1 on other errors.  Either way, `*s` is untouched.
+static int32_t
+utf8_decode (const char **s, size_t len)
 {
 	// End of string, we go no further
 	if (!len)
-		return NULL;
+		return -1;
 
 	// Find out how long the sequence is (0 for ASCII)
 	unsigned mask = 0x80;
 	unsigned sequence_len = 0;
 
-	const uint8_t *p = (const uint8_t *) s;
+	const uint8_t *p = (const uint8_t *) *s, *end = p + len;
 	while ((*p & mask) == mask)
 	{
 		// Invalid start of sequence
 		if (mask == 0xFE)
-			return NULL;
+			return -1;
 
 		mask |= mask >> 1;
 		sequence_len++;
 	}
 
-	// In the middle of a character or the input is too short
-	if (sequence_len == 1 || sequence_len > len)
-		return NULL;
+	// In the middle of a character
+	if (sequence_len == 1)
+		return -1;
 
 	// Check the rest of the sequence
 	uint32_t cp = *p++ & ~mask;
 	while (sequence_len && --sequence_len)
 	{
+		if (p == end)
+			return -2;
 		if ((*p & 0xC0) != 0x80)
-			return NULL;
+			return -1;
 		cp = cp << 6 | (*p++ & 0x3F);
 	}
-	if (codepoint)
-		*codepoint = cp;
-	return (const char *) p;
+	*s = (const char *) p;
+	return cp;
 }
 
 /// Very rough UTF-8 validation, just makes sure codepoints can be iterated
 static bool
 utf8_validate (const char *s, size_t len)
 {
-	const char *next;
-	while (len)
-	{
-		int32_t codepoint;
-		// TODO: better validations
-		if (!(next = utf8_next (s, len, &codepoint))
-		 || codepoint > 0x10FFFF)
-			return false;
-
-		len -= next - s;
-		s = next;
-	}
-	return true;
+	const char *end = s + len;
+	int32_t codepoint;
+	while ((codepoint = utf8_decode (&s, end - s)) >= 0
+		&& codepoint <= 0x10FFFF /* TODO: better validations */)
+		;
+	return s == end;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -2802,12 +2798,12 @@ utf8_iter_next (struct utf8_iter *self, size_t *len)
 		return -1;
 
 	const char *old = self->s;
-	int32_t codepoint;
-	if (!soft_assert ((self->s = utf8_next (old, self->len, &codepoint))))
+	int32_t codepoint = utf8_decode (&self->s, self->len);
+	if (!soft_assert (codepoint >= 0))
 	{
 		// Invalid UTF-8
 		self->len = 0;
-		return -1;
+		return codepoint;
 	}
 
 	size_t advance = self->s - old;

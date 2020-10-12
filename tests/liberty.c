@@ -326,6 +326,11 @@ test_str_map (void)
 static void
 test_utf8 (void)
 {
+	const char *full = "\xc5\x99", *partial = full, *empty = full;
+	soft_assert (utf8_decode (&full,    2) == 0x0159);
+	soft_assert (utf8_decode (&partial, 1) == -2);
+	soft_assert (utf8_decode (&empty,   0) == -1);
+
 	const char valid  [] = "2H₂ + O₂ ⇌ 2H₂O, R = 4.7 kΩ, ⌀ 200 mm";
 	const char invalid[] = "\xf0\x90\x28\xbc";
 	soft_assert ( utf8_validate (valid,   sizeof valid));
