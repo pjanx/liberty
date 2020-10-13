@@ -3782,7 +3782,7 @@ opt_handler_usage (const struct opt_handler *self, FILE *stream)
 		str_append_printf (&row, "--%s", opt->long_name);
 		if (opt->arg_hint)
 			str_append_printf (&row, (opt->flags & OPT_OPTIONAL_ARG)
-				? " [%s]" : " %s", opt->arg_hint);
+				? "[=%s]" : " %s", opt->arg_hint);
 
 		// TODO: keep the indent if there are multiple lines
 		if (row.len + 2 <= OPT_USAGE_ALIGNMENT_COLUMN)
