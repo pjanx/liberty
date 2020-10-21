@@ -2770,6 +2770,13 @@ utf8_decode (const char **s, size_t len)
 	return cp;
 }
 
+static inline bool
+utf8_validate_cp (int32_t cp)
+{
+	// RFC 3629, CESU-8 not allowed
+	return cp >= 0 && cp <= 0x10FFFF && (cp < 0xD800 || cp > 0xDFFF);
+}
+
 /// Very rough UTF-8 validation, just makes sure codepoints can be iterated
 static bool
 utf8_validate (const char *s, size_t len)
@@ -2777,7 +2784,7 @@ utf8_validate (const char *s, size_t len)
 	const char *end = s + len;
 	int32_t codepoint;
 	while ((codepoint = utf8_decode (&s, end - s)) >= 0
-		&& codepoint <= 0x10FFFF /* TODO: better validations */)
+		&& utf8_validate_cp (codepoint))
 		;
 	return s == end;
 }
