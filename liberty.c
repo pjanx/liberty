@@ -117,7 +117,8 @@ extern char **environ;
 #define CONTAINER_OF(pointer, type, member) \
 	((type *) ((char *) pointer - offsetof (type, member)))
 
-char *liberty = "They who can give up essential liberty to obtain a little "
+const char *liberty =
+	"They who can give up essential liberty to obtain a little "
 	"temporary safety deserve neither liberty nor safety.";
 
 // --- Logging -----------------------------------------------------------------
@@ -287,7 +288,7 @@ xreallocarray (void *o, size_t n, size_t m)
 static char *
 xstrdup (const char *s)
 {
-	return strcpy (xmalloc (strlen (s) + 1), s);
+	return strcpy ((char *) xmalloc (strlen (s) + 1), s);
 }
 
 static char *
@@ -297,7 +298,7 @@ xstrndup (const char *s, size_t n)
 	if (n > size)
 		n = size;
 
-	char *copy = xmalloc (n + 1);
+	char *copy = (char *) xmalloc (n + 1);
 	memcpy (copy, s, n);
 	copy[n] = '\0';
 	return copy;
@@ -310,14 +311,15 @@ xstrndup (const char *s, size_t n)
 #define ARRAY(type, name) type *name; size_t name ## _len, name ## _alloc;
 #define ARRAY_INIT_SIZED(a, n)                                                 \
 	BLOCK_START                                                                \
-		(a) = xcalloc (sizeof *(a), (a ## _alloc) = (n));                      \
+		(a) = (type *) xcalloc (sizeof *(a), (a ## _alloc) = (n));             \
 		(a ## _len) = 0;                                                       \
 	BLOCK_END
 #define ARRAY_INIT(a) ARRAY_INIT_SIZED (a, 16)
 #define ARRAY_RESERVE(a, n)                                                    \
 	BLOCK_START                                                                \
 		while ((a ## _alloc) - (a ## _len) < n)                                \
-			(a) = xreallocarray ((a), sizeof *(a), (a ## _alloc) <<= 1);       \
+			(a) = (type *) xreallocarray ((a),                                 \
+				sizeof *(a), (a ## _alloc) <<= 1);                             \
 	BLOCK_END
 
 // --- Double-linked list helpers ----------------------------------------------
@@ -392,7 +394,7 @@ strv_make (void)
 	struct strv self;
 	self.alloc = 4;
 	self.len = 0;
-	self.vector = xcalloc (sizeof *self.vector, self.alloc);
+	self.vector = (char **) xcalloc (sizeof *self.vector, self.alloc);
 	return self;
 }
 
@@ -419,7 +421,7 @@ strv_append_owned (struct strv *self, char *s)
 {
 	self->vector[self->len] = s;
 	if (++self->len >= self->alloc)
-		self->vector = xreallocarray (self->vector,
+		self->vector = (char **) xreallocarray (self->vector,
 			sizeof *self->vector, (self->alloc <<= 1));
 	self->vector[self->len] = NULL;
 }
@@ -492,7 +494,7 @@ str_make (void)
 	struct str self;
 	self.alloc = 16;
 	self.len = 0;
-	self.str = strcpy (xmalloc (self.alloc), "");
+	self.str = strcpy ((char *) xmalloc (self.alloc), "");
 	return self;
 }
 
@@ -529,7 +531,7 @@ str_reserve (struct str *self, size_t n)
 	while (new_alloc <= self->len + n)
 		new_alloc <<= 1;
 	if (new_alloc != self->alloc)
-		self->str = xrealloc (self->str, (self->alloc = new_alloc));
+		self->str = (char *) xrealloc (self->str, (self->alloc = new_alloc));
 }
 
 static void
@@ -608,7 +610,7 @@ str_remove_slice (struct str *self, size_t start, size_t length)
 
 	// Shrink the string if the allocation becomes way too large
 	if (self->alloc >= STR_SHRINK_THRESHOLD && self->len < (self->alloc >> 2))
-		self->str = xrealloc (self->str, self->alloc >>= 2);
+		self->str = (char *) xrealloc (self->str, self->alloc >>= 2);
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -622,7 +624,11 @@ str_pack_u8 (struct str *self, uint8_t x)
 static void
 str_pack_u16 (struct str *self, uint16_t x)
 {
-	uint8_t tmp[2] = { x >> 8, x };
+	uint8_t tmp[2] =
+	{
+		(uint8_t) (x >> 8),
+		(uint8_t)  x
+	};
 	str_append_data (self, tmp, sizeof tmp);
 }
 
@@ -630,7 +636,13 @@ static void
 str_pack_u32 (struct str *self, uint32_t x)
 {
 	uint32_t u = x;
-	uint8_t tmp[4] = { u >> 24, u >> 16, u >> 8, u };
+	uint8_t tmp[4] =
+	{
+		(uint8_t) (u >> 24),
+		(uint8_t) (u >> 16),
+		(uint8_t) (u >>  8),
+		(uint8_t)  u
+	};
 	str_append_data (self, tmp, sizeof tmp);
 }
 
@@ -638,7 +650,16 @@ static void
 str_pack_u64 (struct str *self, uint64_t x)
 {
 	uint8_t tmp[8] =
-		{ x >> 56, x >> 48, x >> 40, x >> 32, x >> 24, x >> 16, x >> 8, x };
+	{
+		(uint8_t) (x >> 56),
+		(uint8_t) (x >> 48),
+		(uint8_t) (x >> 40),
+		(uint8_t) (x >> 32),
+		(uint8_t) (x >> 24),
+		(uint8_t) (x >> 16),
+		(uint8_t) (x >>  8),
+		(uint8_t)  x
+	};
 	str_append_data (self, tmp, sizeof tmp);
 }
 
@@ -672,8 +693,8 @@ error_set (struct error **e, const char *message, ...)
 
 	hard_assert (size >= 0);
 
-	struct error *tmp = xmalloc (sizeof *tmp);
-	tmp->message = xmalloc (size + 1);
+	struct error *tmp = (struct error *) xmalloc (sizeof *tmp);
+	tmp->message = (char *) xmalloc (size + 1);
 
 	va_start (ap, message);
 	size = vsnprintf (tmp->message, size + 1, message, ap);
@@ -778,7 +799,7 @@ random_bytes (void *output, size_t len, struct error **e)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static unsigned char g_siphash_key[16] = "SipHash 2-4 key!";
+static unsigned char g_siphash_key[16] = "SipHash 2-4 key" /* \0 */;
 
 static inline void
 siphash_wrapper_randomize (void)
@@ -790,7 +811,7 @@ siphash_wrapper_randomize (void)
 static inline uint64_t
 siphash_wrapper (const void *m, size_t len)
 {
-	return siphash (g_siphash_key, m, len);
+	return siphash (g_siphash_key, (const unsigned char *) m, len);
 }
 
 // --- String hash map ---------------------------------------------------------
@@ -832,7 +853,7 @@ str_map_make (str_map_free_fn free)
 	self.len = 0;
 	self.free = free;
 	self.key_xfrm = NULL;
-	self.map = xcalloc (self.alloc, sizeof *self.map);
+	self.map = (struct str_map_link **) xcalloc (self.alloc, sizeof *self.map);
 	self.shrink_lock = false;
 	return self;
 }
@@ -888,7 +909,8 @@ str_map_resize (struct str_map *self, size_t new_size)
 	size_t mask = new_size - 1;
 
 	self->alloc = new_size;
-	self->map = xcalloc (self->alloc, sizeof *self->map);
+	self->map =
+		(struct str_map_link **) xcalloc (self->alloc, sizeof *self->map);
 	for (i = 0; i < old_size; i++)
 	{
 		struct str_map_link *iter = old_map[i], *next_iter;
@@ -958,7 +980,8 @@ str_map_set_real (struct str_map *self, const char *key, void *value)
 
 	// Link in a new element for the given <key, value> pair
 	size_t key_length = strlen (key);
-	struct str_map_link *link = xmalloc (sizeof *link + key_length + 1);
+	struct str_map_link *link =
+		(struct str_map_link *) xmalloc (sizeof *link + key_length + 1);
 	link->data = value;
 	link->key_length = key_length;
 	memcpy (link->key, key, key_length + 1);
@@ -1161,7 +1184,7 @@ async_cancel (struct async *self)
 static void
 async_cleanup (void *user_data)
 {
-	struct async *self = user_data;
+	struct async *self = (struct async *) user_data;
 
 	hard_assert (!pthread_mutex_lock (&self->manager->lock));
 	LIST_UNLINK (self->manager->running, self);
@@ -1177,7 +1200,7 @@ async_routine (void *user_data)
 {
 	// Beware that we mustn't trigger any cancellation point before we set up
 	// the cleanup handler, otherwise we'd need to disable it first
-	struct async *self = user_data;
+	struct async *self = (struct async *) user_data;
 	pthread_cleanup_push (async_cleanup, self);
 
 	self->execute (self);
@@ -1386,7 +1409,8 @@ poller_timers_make (void)
 	struct poller_timers self;
 	self.alloc = POLLER_MIN_ALLOC;
 	self.len = 0;
-	self.heap = xmalloc (self.alloc * sizeof *self.heap);
+	self.heap =
+		(struct poller_timer **) xmalloc (self.alloc * sizeof *self.heap);
 	return self;
 }
 
@@ -1496,7 +1520,7 @@ poller_timers_set (struct poller_timers *self, struct poller_timer *timer)
 	}
 
 	if (self->len == self->alloc)
-		self->heap = xreallocarray (self->heap,
+		self->heap = (struct poller_timer **) xreallocarray (self->heap,
 			self->alloc <<= 1, sizeof *self->heap);
 	self->heap[self->len] = timer;
 	timer->index = self->len;
@@ -1573,9 +1597,10 @@ poller_init (struct poller *self)
 
 	self->len = 0;
 	self->alloc = POLLER_MIN_ALLOC;
-	self->fds = xcalloc (self->alloc, sizeof *self->fds);
-	self->dummy = xcalloc (self->alloc, sizeof *self->dummy);
-	self->revents = xcalloc (self->alloc, sizeof *self->revents);
+	self->fds = (struct poller_fd **) xcalloc (self->alloc, sizeof *self->fds);
+	self->dummy = (int *) xcalloc (self->alloc, sizeof *self->dummy);
+	self->revents = (struct epoll_event *)
+		xcalloc (self->alloc, sizeof *self->revents);
 	self->revents_len = 0;
 
 	poller_common_init (&self->common, self);
@@ -1588,7 +1613,7 @@ poller_free (struct poller *self)
 	{
 		struct poller_fd *fd = self->fds[i];
 		hard_assert (epoll_ctl (self->epoll_fd,
-			EPOLL_CTL_DEL, fd->fd, (void *) "") != -1);
+			EPOLL_CTL_DEL, fd->fd, (struct epoll_event *) "") != -1);
 	}
 
 	poller_common_free (&self->common);
@@ -1608,11 +1633,11 @@ poller_ensure_space (struct poller *self)
 	self->alloc <<= 1;
 	hard_assert (self->alloc != 0);
 
-	self->revents = xreallocarray
+	self->revents = (struct epoll_event *) xreallocarray
 		(self->revents, sizeof *self->revents, self->alloc);
-	self->fds = xreallocarray
+	self->fds = (struct poller_fd **) xreallocarray
 		(self->fds, sizeof *self->fds, self->alloc);
-	self->dummy = xreallocarray
+	self->dummy = (int *) xreallocarray
 		(self->dummy, sizeof *self->dummy, self->alloc);
 }
 
@@ -1664,8 +1689,12 @@ poller_set (struct poller *self, struct poller_fd *fd)
 static int
 poller_compare_fds (const void *ax, const void *bx)
 {
-	const struct epoll_event *ay = ax, *by = bx;
-	struct poller_fd *a = ay->data.ptr, *b = by->data.ptr;
+	const struct epoll_event
+		*ay = (const struct epoll_event *) ax,
+		*by = (const struct epoll_event *) bx;
+	struct poller_fd
+		*a = (struct poller_fd *) ay->data.ptr,
+		*b = (struct poller_fd *) by->data.ptr;
 	return a->fd - b->fd;
 }
 
@@ -1676,7 +1705,7 @@ poller_remove_from_dispatch (struct poller *self, const struct poller_fd *fd)
 		return;
 
 	struct epoll_event key = { .data.ptr = (void *) fd }, *fd_event;
-	if ((fd_event = bsearch (&key, self->revents,
+	if ((fd_event = (struct epoll_event *) bsearch (&key, self->revents,
 		self->revents_len, sizeof *self->revents, poller_compare_fds)))
 	{
 		fd_event->events = -1;
@@ -1699,7 +1728,7 @@ poller_remove_at_index (struct poller *self, size_t index)
 	poller_remove_from_dispatch (self, fd);
 	if (!fd->closed)
 		hard_assert (epoll_ctl (self->epoll_fd,
-			EPOLL_CTL_DEL, fd->fd, (void *) "") != -1);
+			EPOLL_CTL_DEL, fd->fd, (struct epoll_event *) "") != -1);
 
 	if (index != --self->len)
 	{
@@ -1735,7 +1764,7 @@ poller_run (struct poller *self)
 		if (revents->events == (uint32_t) -1)
 			continue;
 
-		struct poller_fd *fd = revents->data.ptr;
+		struct poller_fd *fd = (struct poller_fd *) revents->data.ptr;
 		hard_assert (fd->index != -1);
 
 		struct pollfd pfd;
@@ -1778,8 +1807,9 @@ poller_init (struct poller *self)
 
 	self->len = 0;
 	self->alloc = POLLER_MIN_ALLOC;
-	self->fds = xcalloc (self->alloc, sizeof *self->fds);
-	self->revents = xcalloc (self->alloc, sizeof *self->revents);
+	self->fds = (struct poller_fd **) xcalloc (self->alloc, sizeof *self->fds);
+	self->revents = (struct kevent *)
+		xcalloc (self->alloc, sizeof *self->revents);
 	self->revents_len = 0;
 	poller_common_init (&self->common, self);
 }
@@ -1802,9 +1832,9 @@ poller_ensure_space (struct poller *self)
 	self->alloc <<= 1;
 	hard_assert (self->alloc != 0);
 
-	self->revents = xreallocarray
+	self->revents = (struct kevent *) xreallocarray
 		(self->revents, sizeof *self->revents, self->alloc);
-	self->fds = xreallocarray
+	self->fds = (struct poller_fd **) xreallocarray
 		(self->fds, sizeof *self->fds, self->alloc);
 }
 
@@ -2004,8 +2034,9 @@ poller_init (struct poller *self)
 {
 	self->alloc = POLLER_MIN_ALLOC;
 	self->len = 0;
-	self->fds = xcalloc (self->alloc, sizeof *self->fds);
-	self->fds_data = xcalloc (self->alloc, sizeof *self->fds_data);
+	self->fds = (struct pollfd **) xcalloc (self->alloc, sizeof *self->fds);
+	self->fds_data = (struct poller_fd **)
+		xcalloc (self->alloc, sizeof *self->fds_data);
 	poller_common_init (&self->common, self);
 	self->dispatch_next = -1;
 }
@@ -2025,8 +2056,9 @@ poller_ensure_space (struct poller *self)
 		return;
 
 	self->alloc <<= 1;
-	self->fds = xreallocarray (self->fds, sizeof *self->fds, self->alloc);
-	self->fds_data = xreallocarray
+	self->fds = (struct pollfd *)
+		xreallocarray (self->fds, sizeof *self->fds, self->alloc);
+	self->fds_data = (struct poller_fd **) xreallocarray
 		(self->fds_data, sizeof *self->fds_data, self->alloc);
 }
 
@@ -2310,7 +2342,8 @@ static struct async_getaddrinfo *
 async_getaddrinfo (struct async_manager *manager,
 	const char *host, const char *service, const struct addrinfo *hints)
 {
-	struct async_getaddrinfo *self = xcalloc (1, sizeof *self);
+	struct async_getaddrinfo *self =
+		(struct async_getaddrinfo *) xcalloc (1, sizeof *self);
 	self->async = async_make (manager);
 
 	if (host)     self->host = xstrdup (host);
@@ -2374,10 +2407,11 @@ static struct async_getnameinfo *
 async_getnameinfo (struct async_manager *manager,
 	const struct sockaddr *sa, socklen_t sa_len, int flags)
 {
-	struct async_getnameinfo *self = xcalloc (1, sizeof *self);
+	struct async_getnameinfo *self =
+		(struct async_getnameinfo *) xcalloc (1, sizeof *self);
 	self->async = async_make (manager);
 
-	self->address = memcpy (xmalloc (sa_len), sa, sa_len);
+	self->address = (struct sockaddr *) memcpy (xmalloc (sa_len), sa, sa_len);
 	self->address_len = sa_len;
 	self->flags = flags;
 
@@ -2542,7 +2576,12 @@ struct msg_unpacker
 static struct msg_unpacker
 msg_unpacker_make (const void *data, size_t len)
 {
-	return (struct msg_unpacker) { .data = data, .len = len, .offset = 0 };
+	return (struct msg_unpacker)
+	{
+		.data = (const char *) data,
+		.offset = 0,
+		.len = len
+	};
 }
 
 static size_t
@@ -2631,8 +2670,16 @@ msg_writer_flush (struct msg_writer *self, size_t *len)
 {
 	// Update the message length
 	uint64_t x = self->buf.len;
-	uint8_t tmp[8] =
-		{ x >> 56, x >> 48, x >> 40, x >> 32, x >> 24, x >> 16, x >> 8, x };
+	uint8_t tmp[8] = {
+		(uint8_t) (x >> 56),
+		(uint8_t) (x >> 48),
+		(uint8_t) (x >> 40),
+		(uint8_t) (x >> 32),
+		(uint8_t) (x >> 24),
+		(uint8_t) (x >> 16),
+		(uint8_t) (x >>  8),
+		(uint8_t)  x
+	};
 	memcpy (self->buf.str, tmp, sizeof tmp);
 
 	*len = x;
@@ -2911,7 +2958,7 @@ base64_encode (const void *data, size_t len, struct str *output)
 	const char *alphabet =
 		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-	const uint8_t *p = data;
+	const uint8_t *p = (const uint8_t *) data;
 	size_t n_groups = len / 3;
 	size_t tail = len - n_groups * 3;
 	uint32_t group;
@@ -2948,10 +2995,10 @@ base64_encode (const void *data, size_t len, struct str *output)
 // --- Utilities ---------------------------------------------------------------
 
 static void
-cstr_set (char **s, char *new)
+cstr_set (char **s, char *new_)
 {
 	free (*s);
-	*s = new;
+	*s = new_;
 }
 
 static void
@@ -3029,7 +3076,7 @@ iconv_xstrdup (iconv_t conv, char *in, size_t in_len, size_t *out_len)
 	char *buf, *buf_ptr;
 	size_t out_left, buf_alloc;
 
-	buf = buf_ptr = xmalloc (out_left = buf_alloc = 64);
+	buf = buf_ptr = (char *) xmalloc (out_left = buf_alloc = 64);
 
 	char *in_ptr = in;
 	if (in_len == (size_t) -1)
@@ -3045,7 +3092,7 @@ iconv_xstrdup (iconv_t conv, char *in, size_t in_len, size_t *out_len)
 			return NULL;
 		}
 		out_left += buf_alloc;
-		char *new_buf = xrealloc (buf, buf_alloc <<= 1);
+		char *new_buf = (char *) xrealloc (buf, buf_alloc <<= 1);
 		buf_ptr += new_buf - buf;
 		buf = new_buf;
 	}
@@ -3126,8 +3173,8 @@ lock_pid_file (const char *path, struct error **e)
 	struct flock lock =
 	{
 		.l_type = F_WRLCK,
-		.l_start = 0,
 		.l_whence = SEEK_SET,
+		.l_start = 0,
 		.l_len = 0,
 	};
 	if (fcntl (fd, F_SETLK, &lock))
@@ -3326,7 +3373,7 @@ resolve_relative_runtime_filename (const char *filename)
 /// path can reside in a system-wide directory with no risk of a conflict.
 /// However, we have to take care about permissions.  Do we even need this?
 static char *
-resolve_relative_runtime_template (const char *template)
+resolve_relative_runtime_template (const char *template_)
 {
 	struct str path = str_make ();
 	const char *runtime_dir = getenv ("XDG_RUNTIME_DIR");
@@ -3338,7 +3385,7 @@ resolve_relative_runtime_template (const char *template)
 	else
 		str_append_printf (&path, "/tmp/%s.%d", PROGRAM_NAME, geteuid ());
 
-	str_append_printf (&path, "/%s", template);
+	str_append_printf (&path, "/%s", template_);
 	return resolve_relative_runtime_filename_finish (path);
 }
 
@@ -3360,9 +3407,9 @@ try_expand_tilde (const char *filename)
 	struct passwd pwd, *success = NULL;
 
 	char *user = xstrndup (filename, until_slash);
-	char *buf = xmalloc (buf_len);
+	char *buf = (char *) xmalloc (buf_len);
 	while (getpwnam_r (user, &pwd, buf, buf_len, &success) == ERANGE)
-		buf = xrealloc (buf, buf_len <<= 1);
+		buf = (char *) xrealloc (buf, buf_len <<= 1);
 	free (user);
 
 	char *result = NULL;
@@ -3438,7 +3485,7 @@ xssl_get_error (SSL *ssl, int result, const char **error_info)
 static regex_t *
 regex_compile (const char *regex, int flags, struct error **e)
 {
-	regex_t *re = xmalloc (sizeof *re);
+	regex_t *re = (regex_t *) xmalloc (sizeof *re);
 	int err = regcomp (re, regex, flags);
 	if (!err)
 		return re;
@@ -3454,7 +3501,7 @@ regex_compile (const char *regex, int flags, struct error **e)
 static void
 regex_free (void *regex)
 {
-	regfree (regex);
+	regfree ((regex_t *) regex);
 	free (regex);
 }
 
@@ -3473,7 +3520,7 @@ static bool
 regex_cache_match (struct str_map *cache, const char *regex, int flags,
 	const char *s, struct error **e)
 {
-	regex_t *re = str_map_find (cache, regex);
+	regex_t *re = (regex_t *) str_map_find (cache, regex);
 	if (!re)
 	{
 		re = regex_compile (regex, flags, e);
@@ -3743,7 +3790,7 @@ opt_handler_make (int argc, char **argv,
 
 	self.opts = opts;
 	self.opts_len = len;
-	self.options = xcalloc (len + 1, sizeof *self.options);
+	self.options = (struct option *) xcalloc (len + 1, sizeof *self.options);
 
 	struct str opt_string = str_make ();
 	for (size_t i = 0; i < len; i++)
@@ -3921,7 +3968,7 @@ test_add_internal (struct test *self, const char *name, size_t fixture_size,
 	hard_assert (test != NULL);
 	hard_assert (name != NULL);
 
-	struct test_unit *unit = xcalloc (1, sizeof *unit);
+	struct test_unit *unit = (struct test_unit *) xcalloc (1, sizeof *unit);
 	unit->name = xstrdup (name);
 	unit->fixture_size = fixture_size;
 	unit->user_data = user_data;
@@ -4074,7 +4121,8 @@ struct connector_target
 static struct connector_target *
 connector_target_new (void)
 {
-	struct connector_target *self = xcalloc (1, sizeof *self);
+	struct connector_target *self =
+		(struct connector_target *) xcalloc (1, sizeof *self);
 	return self;
 }
 
@@ -4287,7 +4335,7 @@ connector_free (struct connector *self)
 static void
 connector_on_getaddrinfo (int err, struct addrinfo *results, void *user_data)
 {
-	struct connector_target *self = user_data;
+	struct connector_target *self = (struct connector_target *) user_data;
 
 	if (err)
 	{
@@ -4540,7 +4588,8 @@ config_item_move (struct config_item *self, struct config_item *source)
 static struct config_item *
 config_item_new (enum config_item_type type)
 {
-	struct config_item *self = xcalloc (1, sizeof *self);
+	struct config_item *self =
+		(struct config_item *) xcalloc (1, sizeof *self);
 	self->type = type;
 	return self;
 }
@@ -4680,7 +4729,8 @@ config_item_get (struct config_item *self, const char *path, struct error **e)
 		const char *key = v.vector[i];
 		if (!*key)
 			error_set (e, "empty path element");
-		else if (!(self = str_map_find (&self->value.object, key)))
+		else if (!(self = (struct config_item *)
+			str_map_find (&self->value.object, key)))
 			error_set (e, "`%s' not found in object", key);
 		else if (++i == v.len)
 			result = self;
@@ -4811,7 +4861,7 @@ config_item_write_object_innards
 
 	struct str_map_iter iter = str_map_iter_make (&object->value.object);
 	struct config_item *value;
-	while ((value = str_map_iter_next (&iter)))
+	while ((value = (struct config_item *) str_map_iter_next (&iter)))
 		config_item_write_kv_pair (self, iter.link->key, value);
 }
 
@@ -5377,11 +5427,11 @@ config_read_from_file (const char *filename, struct error **e)
 {
 	struct config_item *root = NULL;
 
+	struct error *error = NULL;
 	struct str data = str_make ();
 	if (!read_file (filename, &data, e))
 		goto end;
 
-	struct error *error = NULL;
 	if (!(root = config_item_parse (data.str, data.len, false, &error)))
 	{
 		error_set (e, "parse error in `%s': %s", filename, error->message);
@@ -5401,12 +5451,12 @@ config_schema_initialize_item (struct config_schema *schema,
 	struct error **e)
 {
 	hard_assert (parent->type == CONFIG_ITEM_OBJECT);
-	struct config_item *item =
+	struct config_item *item = (struct config_item *)
 		str_map_find (&parent->value.object, schema->name);
 
+	struct error *error = NULL;
 	if (item)
 	{
-		struct error *error = NULL;
 		item->user_data = user_data;
 		if (config_item_validate_by_schema (item, schema, &error))
 			goto keep_current;
@@ -5414,9 +5464,9 @@ config_schema_initialize_item (struct config_schema *schema,
 		error_set (warning, "resetting configuration item "
 			"`%s' to default: %s", schema->name, error->message);
 		error_free (error);
+		error = NULL;
 	}
 
-	struct error *error = NULL;
 	if (schema->default_)
 		item = config_item_parse
 			(schema->default_, strlen (schema->default_), true, &error);
@@ -5479,7 +5529,7 @@ config_schema_call_changed (struct config_item *item)
 	{
 		struct str_map_iter iter = str_map_iter_make (&item->value.object);
 		struct config_item *child;
-		while ((child = str_map_iter_next (&iter)))
+		while ((child = (struct config_item *) str_map_iter_next (&iter)))
 			config_schema_call_changed (child);
 	}
 	else if (item->schema && item->schema->on_change)
@@ -5532,7 +5582,8 @@ static void
 config_register_module (struct config *self,
 	const char *name, config_module_load_fn loader, void *user_data)
 {
-	struct config_module *module = xcalloc (1, sizeof *module);
+	struct config_module *module =
+		(struct config_module *) xcalloc (1, sizeof *module);
 	module->name = xstrdup (name);
 	module->loader = loader;
 	module->user_data = user_data;
@@ -5550,9 +5601,9 @@ config_load (struct config *self, struct config_item *root)
 
 	struct str_map_iter iter = str_map_iter_make (&self->modules);
 	struct config_module *module;
-	while ((module = str_map_iter_next (&iter)))
+	while ((module = (struct config_module *) str_map_iter_next (&iter)))
 	{
-		struct config_item *subtree = str_map_find
+		struct config_item *subtree = (struct config_item *) str_map_find
 			(&root->value.object, module->name);
 		// Silently fix inputs that only a lunatic user could create
 		if (!subtree || subtree->type != CONFIG_ITEM_OBJECT)

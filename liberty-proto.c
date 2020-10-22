@@ -507,7 +507,7 @@ http_parse_upgrade (const char *upgrade, struct http_protocol **out)
 		case HTTP_T_WHITESPACE:
 			break;
 		case HTTP_T_TOKEN:
-			proto = xcalloc (1, sizeof *proto);
+			proto = (struct http_protocol *) xcalloc (1, sizeof *proto);
 			proto->name = xstrdup (t.string.str);
 			LIST_APPEND_WITH_TAIL (list, tail, proto);
 			state = STATE_SLASH;
@@ -1002,7 +1002,7 @@ fcgi_nv_parser_push (struct fcgi_nv_parser *self, const void *data, size_t len)
 		if (self->input.len < self->name_len)
 			return;
 
-		self->name = xmalloc (self->name_len + 1);
+		self->name = (char *) xmalloc (self->name_len + 1);
 		self->name[self->name_len] = '\0';
 		memcpy (self->name, self->input.str, self->name_len);
 		str_remove_slice (&self->input, 0, self->name_len);
@@ -1012,7 +1012,7 @@ fcgi_nv_parser_push (struct fcgi_nv_parser *self, const void *data, size_t len)
 		if (self->input.len < self->value_len)
 			return;
 
-		self->value = xmalloc (self->value_len + 1);
+		self->value = (char *) xmalloc (self->value_len + 1);
 		self->value[self->value_len] = '\0';
 		memcpy (self->value, self->input.str, self->value_len);
 		str_remove_slice (&self->input, 0, self->value_len);
@@ -1050,7 +1050,7 @@ fcgi_nv_convert (struct str_map *map, struct str *output)
 	while (str_map_iter_next (&iter))
 	{
 		const char *name  = iter.link->key;
-		const char *value = iter.link->data;
+		const char *value = (const char *) iter.link->data;
 		size_t name_len   = iter.link->key_length;
 		size_t value_len  = strlen (value);
 
@@ -1227,7 +1227,7 @@ ws_parser_push (struct ws_parser *self, const void *data, size_t len)
 		self->reserved_1  = (u8 >> 6) &   1;
 		self->reserved_2  = (u8 >> 5) &   1;
 		self->reserved_3  = (u8 >> 4) &   1;
-		self->opcode      =  u8       &  15;
+		self->opcode      = (enum ws_opcode) (u8 & 15);
 
 		(void) msg_unpacker_u8 (&unpacker, &u8);
 		self->is_masked   = (u8 >> 7) &   1;
@@ -1423,9 +1423,9 @@ mpd_client_make (struct poller *poller)
 		.socket = -1,
 		.read_buffer = str_make (),
 		.write_buffer = str_make (),
-		.data = strv_make (),
 		.socket_event = poller_fd_make (poller, -1),
 		.timeout_timer = poller_timer_make (poller),
+		.data = strv_make (),
 	};
 }
 
@@ -1464,7 +1464,7 @@ mpd_client_reset (struct mpd_client *self)
 {
 	// Get rid of all pending tasks to release resources etc.
 	strv_reset (&self->data);
-	struct mpd_response aborted = { .message_text = "Disconnected" };
+	struct mpd_response aborted = { .message_text = (char *) "Disconnected" };
 	while (self->tasks)
 		mpd_client_dispatch (self, &aborted);
 
@@ -1524,7 +1524,8 @@ mpd_client_parse_response (const char *p, struct mpd_response *response)
 	if (errno != 0 || end == p)
 		return false;
 	p = end;
-	if (*p++ != ']' || *p++ != ' ' || *p++ != '{' || !(end = strchr (p, '}')))
+	if (*p++ != ']' || *p++ != ' ' || *p++ != '{'
+	 || !(end = (char *) strchr (p, '}')))
 		return false;
 
 	response->current_command = xstrndup (p, end - p);
@@ -1624,7 +1625,7 @@ mpd_client_on_ready (const struct pollfd *pfd, void *user_data)
 {
 	(void) pfd;
 
-	struct mpd_client *self = user_data;
+	struct mpd_client *self = (struct mpd_client *) user_data;
 	if (socket_io_try_read  (self->socket, &self->read_buffer)  != SOCKET_IO_OK
 	 || !mpd_client_process_input (self)
 	 || socket_io_try_write (self->socket, &self->write_buffer) != SOCKET_IO_OK)
@@ -1676,7 +1677,8 @@ mpd_client_add_task
 	// later flushed if an early ACK or OK arrives).
 	hard_assert (!self->in_list);
 
-	struct mpd_client_task *task = xcalloc (1, sizeof *self);
+	struct mpd_client_task *task =
+		(struct mpd_client_task *) xcalloc (1, sizeof *self);
 	task->callback = cb;
 	task->user_data = user_data;
 	LIST_APPEND_WITH_TAIL (self->tasks, self->tasks_tail, task);
@@ -1794,7 +1796,7 @@ mpd_client_on_idle_return (const struct mpd_response *response,
 {
 	(void) response;
 
-	struct mpd_client *self = user_data;
+	struct mpd_client *self = (struct mpd_client *) user_data;
 	unsigned subsystems = 0;
 	for (size_t i = 0; i < data->len; i++)
 	{
@@ -1817,7 +1819,7 @@ static void mpd_client_idle (struct mpd_client *self, unsigned subsystems);
 static void
 mpd_client_on_timeout (void *user_data)
 {
-	struct mpd_client *self = user_data;
+	struct mpd_client *self = (struct mpd_client *) user_data;
 
 	// Abort and immediately restore the current idle so that MPD doesn't
 	// disconnect us, even though the documentation says this won't happen.
@@ -1885,7 +1887,7 @@ mpd_client_destroy_connector (struct mpd_client *self)
 static void
 mpd_client_on_connector_failure (void *user_data)
 {
-	struct mpd_client *self = user_data;
+	struct mpd_client *self = (struct mpd_client *) user_data;
 	mpd_client_destroy_connector (self);
 	mpd_client_fail (self);
 }
@@ -1896,7 +1898,7 @@ mpd_client_on_connector_connected
 {
 	(void) host;
 
-	struct mpd_client *self = user_data;
+	struct mpd_client *self = (struct mpd_client *) user_data;
 	mpd_client_destroy_connector (self);
 	mpd_client_finish_connection (self, socket);
 }
@@ -1940,7 +1942,8 @@ mpd_client_connect (struct mpd_client *self, const char *address,
 	if (strchr (address, '/'))
 		return mpd_client_connect_unix (self, address, e);
 
-	struct connector *connector = xmalloc (sizeof *connector);
+	struct connector *connector =
+		(struct connector *) xmalloc (sizeof *connector);
 	connector_init (connector, self->poller);
 	self->connector = connector;
 
