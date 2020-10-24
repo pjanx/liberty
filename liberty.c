@@ -2748,16 +2748,12 @@ utf8_decode (const char **s, size_t len)
 	}
 
 	// In the middle of a character
-	if (sequence_len == 1)
+	// or an overlong sequence (subset, possibly MUTF-8, not supported)
+	if (sequence_len == 1 || *p == 0xC0 || *p == 0xC1)
 		return -1;
 
 	// Check the rest of the sequence
 	uint32_t cp = *p++ & ~mask;
-
-	// Overlong sequence (possibly MUTF-8, not supported)
-	if (!cp && sequence_len)
-		return -1;
-
 	while (sequence_len && --sequence_len)
 	{
 		if (p == end)

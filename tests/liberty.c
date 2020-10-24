@@ -331,10 +331,12 @@ test_utf8 (void)
 	soft_assert (utf8_decode (&partial, 1) == -2);
 	soft_assert (utf8_decode (&empty,   0) == -1);
 
-	const char valid[] = "2H₂ + O₂ ⇌ 2H₂O, R = 4.7 kΩ, ⌀ 200 mm";
+	const char valid_1[] = "2H₂ + O₂ ⇌ 2H₂O, R = 4.7 kΩ, ⌀ 200 mm";
+	const char valid_2[] = "\xf0\x93\x82\xb9";
 	const char invalid_1[] = "\xf0\x90\x28\xbc";
 	const char invalid_2[] = "\xc0\x80";
-	soft_assert ( utf8_validate (valid,     sizeof valid));
+	soft_assert ( utf8_validate (valid_1,   sizeof valid_1));
+	soft_assert ( utf8_validate (valid_2,   sizeof valid_2));
 	soft_assert (!utf8_validate (invalid_1, sizeof invalid_1));
 	soft_assert (!utf8_validate (invalid_2, sizeof invalid_2));
 
