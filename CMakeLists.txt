@@ -16,8 +16,6 @@ find_package (PkgConfig REQUIRED)
 pkg_check_modules (libssl REQUIRED libssl libcrypto)
 
 if ("${CMAKE_SYSTEM_NAME}" MATCHES "BSD")
-	include_directories (/usr/local/include)
-	link_directories (/usr/local/lib)
 	# Our POSIX version macros make these undefined
 	add_definitions (-D__BSD_VISIBLE=1 -D_BSD_SOURCE=1)
 endif ("${CMAKE_SYSTEM_NAME}" MATCHES "BSD")
