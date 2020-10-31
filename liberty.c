@@ -4708,13 +4708,15 @@ config_item_write_string (struct str *output, const struct str *s)
 	for (size_t i = 0; i < s->len; i++)
 	{
 		unsigned char c = s->str[i];
-		if      (c == '\n')  str_append        (output, "\\n");
-		else if (c == '\r')  str_append        (output, "\\r");
-		else if (c == '\t')  str_append        (output, "\\t");
-		else if (c == '\\')  str_append        (output, "\\\\");
-		else if (c == '"')   str_append        (output, "\\\"");
-		else if (c < 32)     str_append_printf (output, "\\x%02x", c);
-		else                 str_append_c      (output, c);
+		if      (c == '\n')  str_append (output, "\\n");
+		else if (c == '\r')  str_append (output, "\\r");
+		else if (c == '\t')  str_append (output, "\\t");
+		else if (c == '\\')  str_append (output, "\\\\");
+		else if (c == '"')   str_append (output, "\\\"");
+		else if (iscntrl_ascii (c))
+			str_append_printf (output, "\\x%02x", c);
+		else
+			str_append_c (output, c);
 	}
 	str_append_c (output, '"');
 }
