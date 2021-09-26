@@ -3247,7 +3247,7 @@ get_xdg_config_dirs (struct strv *out)
 	str_free (&config_home);
 
 	const char *xdg_config_dirs;
-	if (!(xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")))
+	if (!(xdg_config_dirs = getenv ("XDG_CONFIG_DIRS")) || !*xdg_config_dirs)
 		xdg_config_dirs = "/etc/xdg";
 	cstr_split (xdg_config_dirs, ":", true, out);
 }
@@ -3272,7 +3272,7 @@ get_xdg_data_dirs (struct strv *out)
 	str_free (&data_home);
 
 	const char *xdg_data_dirs;
-	if (!(xdg_data_dirs = getenv ("XDG_DATA_DIRS")))
+	if (!(xdg_data_dirs = getenv ("XDG_DATA_DIRS")) || !*xdg_data_dirs)
 		xdg_data_dirs = "/usr/local/share/:/usr/share/";
 	cstr_split (xdg_data_dirs, ":", true, out);
 }
