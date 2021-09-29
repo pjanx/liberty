@@ -1749,10 +1749,9 @@ poller_run (struct poller *self)
 	self->revents_len = 0;
 }
 
-#elif defined (BSD)
-
-// Mac OS X's kqueue is fatally broken, or so I've been told; leaving it out.
-// Otherwise this is sort of similar to the epoll version.
+// Sort of similar to the epoll version.  Let's hope Darwin isn't broken,
+// that'd mean reimplementing this in terms of select() just because of Crapple.
+#elif defined (BSD) || defined (__APPLE__)
 
 #include <sys/types.h>
 #include <sys/event.h>
