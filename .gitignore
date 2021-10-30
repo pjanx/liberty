@@ -7,3 +7,5 @@
 /liberty.files
 /liberty.creator*
 /liberty.includes
+/liberty.cflags
+/liberty.cxxflags
