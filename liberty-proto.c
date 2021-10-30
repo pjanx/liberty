@@ -148,7 +148,7 @@ irc_free_message (struct irc_message *msg)
 
 static void
 irc_process_buffer (struct str *buf,
-	void (*callback)(const struct irc_message *, const char *, void *),
+	void (*callback) (const struct irc_message *, const char *, void *),
 	void *user_data)
 {
 	char *start = buf->str, *end = start + buf->len;

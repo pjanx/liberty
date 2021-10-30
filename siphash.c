@@ -82,4 +82,3 @@ siphash (const unsigned char key[16], const unsigned char *m, size_t len)
 
 	return v0 ^ v1 ^ v2 ^ v3;
 }
-
