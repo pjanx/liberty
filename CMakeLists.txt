@@ -1,5 +1,5 @@
 project (liberty C)
-cmake_minimum_required (VERSION 2.8.5)
+cmake_minimum_required (VERSION 2.8.12)
 
 # Moar warnings
 if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUCC)
@@ -36,7 +36,17 @@ endforeach ()
 # Build some unit tests
 include_directories (${PROJECT_SOURCE_DIR})
 enable_testing ()
-foreach (name liberty proto)
+set (tests liberty proto)
+
+pkg_check_modules (libpulse libpulse)
+if (libpulse_FOUND)
+	list (APPEND tests pulse)
+	list (APPEND common_libraries ${libpulse_LIBRARIES})
+	include_directories (${libpulse_INCLUDE_DIRS})
+	link_directories (${libpulse_LIBRARY_DIRS})
+endif ()
+
+foreach (name ${tests})
 	add_executable (test-${name} tests/${name}.c ${common_sources})
 	add_threads (test-${name})
 	target_link_libraries (test-${name} ${common_libraries})
