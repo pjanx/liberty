@@ -1321,7 +1321,6 @@ enum mpd_subsystem
 #define XX(a, b, c) MPD_SUBSYSTEM_ ## a = (1 << b),
 	MPD_SUBSYSTEM_TABLE (XX)
 #undef XX
-	MPD_SUBSYSTEM_MAX
 };
 
 static const char *mpd_subsystem_names[] =
