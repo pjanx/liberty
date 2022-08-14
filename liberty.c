@@ -4412,8 +4412,8 @@ socket_io_try_write (int socket_fd, struct str *wb)
 //   object  = lws '{' entries endobj
 //   endobj  = lws '}'
 //
-//   quoted  = lws '"' ('\\' escape / ![\\"] char)* '"'
-//           / lws '`' ![`]* '`'
+//   quoted  = lws '"' (!["\\] char / '\\' escape)* '"'
+//           / lws '`' (![`] char)* '`'
 //   string  = (quoted)+
 //   char    = [\0-\177]  # or any Unicode codepoint in the UTF-8 encoding
 //   escape  = [\\"abfnrtv] / [xX][0-9A-Fa-f][0-9A-Fa-f]? / [0-7][0-7]?[0-7]?
