@@ -1,7 +1,7 @@
 /*
  * tests/liberty.c
  *
- * Copyright (c) 2015 - 2016, Přemysl Eric Janouch <p@janouch.name>
+ * Copyright (c) 2015 - 2022, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
@@ -649,7 +649,7 @@ static struct config_schema g_config_test[] =
 	  .default_  = "1" },
 	{ .name      = "foobar",
 	  .type      = CONFIG_ITEM_STRING,
-	  .default_  = "\"qux\\x01\"" },
+	  .default_  = "\"qux\\x01`\" \"\"`a`" },
 	{}
 };
 
@@ -674,6 +674,9 @@ test_config (void)
 	hard_assert (!config_item_set_from (config_item_get (config.root,
 		"top.bar", NULL), invalid, NULL));
 	config_item_destroy (invalid);
+
+	hard_assert (!strcmp ("qux\001`a",
+		config_item_get (config.root, "top.foobar", NULL)->value.string.str));
 
 	struct str s = str_make ();
 	config_item_write (config.root, true, &s);

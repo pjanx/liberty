@@ -1,7 +1,7 @@
 /*
  * liberty.c: the ultimate C unlibrary
  *
- * Copyright (c) 2014 - 2020, Přemysl Eric Janouch <p@janouch.name>
+ * Copyright (c) 2014 - 2022, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
@@ -4412,7 +4412,9 @@ socket_io_try_write (int socket_fd, struct str *wb)
 //   object  = lws '{' entries endobj
 //   endobj  = lws '}'
 //
-//   string  = lws '"' ('\\' escape / ![\\"] char)* '"'
+//   quoted  = lws '"' ('\\' escape / ![\\"] char)* '"'
+//           / lws '`' ![`]* '`'
+//   string  = (quoted)+
 //   char    = [\0-\177]  # or any Unicode codepoint in the UTF-8 encoding
 //   escape  = [\\"abfnrtv] / [xX][0-9A-Fa-f][0-9A-Fa-f]? / [0-7][0-7]?[0-7]?
 //
@@ -5039,10 +5041,10 @@ config_tokenizer_escape_sequence
 }
 
 static bool
-config_tokenizer_string
-	(struct config_tokenizer *self, struct str *output, struct error **e)
+config_tokenizer_dq_string (struct config_tokenizer *self, struct str *output,
+	struct error **e)
 {
-	unsigned char c;
+	unsigned char c = config_tokenizer_advance (self);
 	while (self->len)
 	{
 		if ((c = config_tokenizer_advance (self)) == '"')
@@ -5054,6 +5056,44 @@ config_tokenizer_string
 	}
 	config_tokenizer_error (self, e, "premature end of string");
 	return false;
+}
+
+static bool
+config_tokenizer_bt_string (struct config_tokenizer *self, struct str *output,
+	struct error **e)
+{
+	unsigned char c = config_tokenizer_advance (self);
+	while (self->len)
+	{
+		if ((c = config_tokenizer_advance (self)) == '`')
+			return true;
+		str_append_c (output, c);
+	}
+	config_tokenizer_error (self, e, "premature end of string");
+	return false;
+}
+
+static bool
+config_tokenizer_string (struct config_tokenizer *self, struct str *output,
+	struct error **e)
+{
+	// Go-like strings, with C/AWK-like automatic concatenation
+	while (self->len)
+	{
+		bool ok = true;
+		if (isspace_ascii (*self->p) && *self->p != '\n')
+			config_tokenizer_advance (self);
+		else if (*self->p == '"')
+			ok = config_tokenizer_dq_string (self, output, e);
+		else if (*self->p == '`')
+			ok = config_tokenizer_bt_string (self, output, e);
+		else
+			break;
+
+		if (!ok)
+			return false;
+	}
+	return true;
 }
 
 static enum config_token
@@ -5080,7 +5120,7 @@ config_tokenizer_next (struct config_tokenizer *self, struct error **e)
 		return CONFIG_T_ABORT;
 
 	case '"':
-		config_tokenizer_advance (self);
+	case '`':
 		str_reset (&self->string);
 		if (!config_tokenizer_string (self, &self->string, e))
 			return CONFIG_T_ABORT;
