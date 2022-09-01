@@ -2450,7 +2450,7 @@ write_queue_processed (struct write_queue *self, size_t len)
 }
 
 static bool
-write_queue_is_empty (struct write_queue *self)
+write_queue_is_empty (const struct write_queue *self)
 {
 	return self->head == NULL;
 }
@@ -2545,7 +2545,7 @@ msg_unpacker_make (const void *data, size_t len)
 }
 
 static size_t
-msg_unpacker_get_available (struct msg_unpacker *self)
+msg_unpacker_get_available (const struct msg_unpacker *self)
 {
 	return self->len - self->offset;
 }
