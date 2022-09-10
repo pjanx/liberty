@@ -16,8 +16,13 @@
  *
  */
 
-#define _POSIX_C_SOURCE 199309L
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+
+#ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 600
+#endif
 
 #include <stdio.h>
 #include <stddef.h>
