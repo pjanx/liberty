@@ -65,7 +65,7 @@ NR == 1 {
 		fatal("expected an empty line after the header")
 
 	# Requesting tbl(1), even though we currently do not support tables.
-	print "'\\\\"" t"
+	print "'\\\" t"
 	print ".TH \"" toupper(name) "\" \"" section "\""
 
 	# Hyphenation is indeed rather annoying, in particular with long links.
