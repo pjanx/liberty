@@ -32,7 +32,7 @@ function expand(s,   attr) {
 function escape(s) {
 	gsub(/\\/, "\\\\", s)
 	gsub(/-/, "\\-", s)
-	gsub(/[.]/, "\\.", s)
+	sub(/^[.']/, "\\\\\\&&", s)
 	return s
 }
 
@@ -80,9 +80,6 @@ function inline(line) {
 
 	line = escape(expand(line))
 
-	# Enable double-spacing after the end of a sentence.
-	gsub(/\\[.][[:space:]]+/, ".\n", s)
-
 	# Strip empty URL descriptions, otherwise useful for demarking the end.
 	while (match(line, /[^[:space:]]+\[\]/)) {
 		line = substr(line, 1, RSTART + RLENGTH - 3) \
@@ -117,6 +114,15 @@ function inline(line) {
 			 "\\fB" substr(line, RSTART + 1, RLENGTH - 2) "\\fP" \
 			 substr(line, RSTART + RLENGTH)
 	}
+
+	# Enable double-spacing after the end of a sentence.
+	gsub(/[.][[:space:]]+/, ".\n", line)
+	gsub(/[!][[:space:]]+/, "!\n", line)
+	gsub(/[?][[:space:]]+/, "?\n", line)
+
+	# Quote commands resulting from that, as well as from expand().
+	gsub(/\n[.]/, "\n\\\\\\&.", line)
+	gsub(/\n[']/, "\n\\\\\\&'", line)
 
 	sub(/[[:space:]]+[+]$/, "\n.br", line)
 	print line
