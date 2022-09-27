@@ -52,3 +52,7 @@ foreach (name ${tests})
 	target_link_libraries (test-${name} ${common_libraries})
 	add_test (NAME test-${name} COMMAND test-${name})
 endforeach ()
+
+add_test (test-cmake-parser
+	env LC_ALL=C awk -f ${PROJECT_SOURCE_DIR}/tools/cmake-parser.awk
+	-f ${PROJECT_SOURCE_DIR}/tools/cmake-dump.awk ${CMAKE_CURRENT_LIST_FILE})
