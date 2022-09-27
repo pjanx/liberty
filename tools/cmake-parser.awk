@@ -133,6 +133,15 @@ function quoted_argument(    v, unescaped) {
 	return v
 }
 
+function finalize_quoted(expanded,    v) {
+	while (match(expanded, /\\./)) {
+		v = v substr(expanded, 1, RSTART - 1) \
+			substr(expanded, RSTART + 1, 1)
+		expanded = substr(expanded, RSTART + RLENGTH)
+	}
+	Args[++N] = v expanded
+}
+
 function unquoted_argument(    v, unescaped) {
 	while (1) {
 		if (match($0, /^[^[:space:]()#"\\]+/)) {
@@ -151,43 +160,36 @@ function unquoted_argument(    v, unescaped) {
 	}
 }
 
-# Note that we keep and reprocess some escape sequences in here.
+function finalize_unquoted(expanded,    v) {
+	while (expanded) {
+		if (expanded ~ /^;/) {
+			if (v)
+				Args[++N] = v
+			v = ""
+			expanded = substr(expanded, 2)
+		} else if (expanded ~ /^\\./) {
+			v = v substr(expanded, 2, 1)
+			expanded = substr(expanded, 3)
+		} else {
+			v = v substr(expanded, 1, 1)
+			expanded = substr(expanded, 2)
+		}
+	}
+	if (v)
+		Args[++N] = v
+}
+
+# We keep and reprocess some escape sequences in here.
 function argument(    arg, expanded, v) {
-	if (regexp("\\[=*\\[")) {
+	if (regexp("\\[=*\\["))
 		Args[++N] = unbracket(RLENGTH - 2)
-		return 1
-	}
-	if ((arg = quoted_argument()) || arg == "") {
-		expanded = expand(arg)
-		while (match(expanded, /\\./)) {
-			v = v substr(expanded, 1, RSTART - 1) \
-				substr(expanded, RSTART + 1, 1)
-			expanded = substr(expanded, RSTART + RLENGTH)
-		}
-		Args[++N] = v expanded
-		return 1
-	}
-	if ((arg = unquoted_argument())) {
-		expanded = expand(arg)
-		while (expanded) {
-			if (expanded ~ /^;/) {
-				if (v)
-					Args[++N] = v
-				v = ""
-				expanded = substr(expanded, 2)
-			} else if (expanded ~ /^\\./) {
-				v = v substr(expanded, 2, 1)
-				expanded = substr(expanded, 3)
-			} else {
-				v = v substr(expanded, 1, 1)
-				expanded = substr(expanded, 2)
-			}
-		}
-		if (v)
-			Args[++N] = v
-		return 1
-	}
-	return 0
+	else if ((arg = quoted_argument()) || arg == "")
+		finalize_quoted(expand(arg))
+	else if ((arg = unquoted_argument()))
+		finalize_unquoted(expand(arg))
+	else
+		return 0
+	return 1
 }
 
 # ------------------------------------------------------------------------------
