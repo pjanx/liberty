@@ -53,6 +53,47 @@ foreach (name ${tests})
 	add_test (NAME test-${name} COMMAND test-${name})
 endforeach ()
 
+# Test CMake script parsing
 add_test (test-cmake-parser
 	env LC_ALL=C awk -f ${PROJECT_SOURCE_DIR}/tools/cmake-parser.awk
 	-f ${PROJECT_SOURCE_DIR}/tools/cmake-dump.awk ${CMAKE_CURRENT_LIST_FILE})
+
+# Test protocol code generation
+set (lxdrgen_outputs)
+set (lxdrgen_base "${PROJECT_BINARY_DIR}/lxdrgen.lxdr")
+foreach (backend c go mjs)
+	list (APPEND lxdrgen_outputs ${lxdrgen_base}.${backend})
+	add_custom_command (OUTPUT ${lxdrgen_base}.${backend}
+		COMMAND env LC_ALL=C awk
+			-f ${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk
+			-f ${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk
+			-v PrefixCamel=ProtoGen
+			${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr
+			> ${lxdrgen_base}.${backend}
+		DEPENDS
+			${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk
+			${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk
+			${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr
+		COMMENT "Generating test protocol code (${backend})" VERBATIM)
+endforeach ()
+add_custom_target (test-lxdrgen-outputs ALL DEPENDS ${lxdrgen_outputs})
+
+set_source_files_properties (${lxdrgen_base}.c
+	PROPERTIES HEADER_FILE_ONLY TRUE)
+add_executable (test-lxdrgen tests/lxdrgen.c ${lxdrgen_base}.c)
+target_include_directories (test-lxdrgen PUBLIC ${PROJECT_BINARY_DIR})
+add_test (NAME test-lxdrgen-c COMMAND test-lxdrgen)
+
+find_program (GO_EXECUTABLE go)
+if (GO_EXECUTABLE)
+	add_test (test-lxdrgen-go ${GO_EXECUTABLE} vet ${lxdrgen_base}.go)
+else ()
+	message (WARNING "Cannot test generated protocol code for Go")
+endif ()
+
+find_program (NODE_EXECUTABLE node)
+if (NODE_EXECUTABLE)
+	add_test (test-lxdrgen-mjs ${NODE_EXECUTABLE} -c ${lxdrgen_base}.mjs)
+else ()
+	message (WARNING "Cannot test generated protocol code for Javascript")
+endif ()

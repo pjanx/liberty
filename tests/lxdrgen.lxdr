@@ -1,0 +1,23 @@
+/*
+ * tests/lxdrgen.lxdr: a test protocol for the generator
+ */
+const VERSION = 1;
+const NOISREV = -1;
+
+// TODO: Test failure paths, and in general go for full coverage.
+struct Struct {
+	union Union switch (enum Enum {
+		NUMBERS = VERSION,
+		OTHERS = 2,
+		NOTHING,
+	} tag) {
+	case NUMBERS:
+		i8 a; i16 b; i32 c; i64 d;
+		u8 e; u16 f; u32 g; u64 h;
+	case OTHERS:
+		bool foo;
+		string bar;
+	case NOTHING:
+		void;
+	} u<>;
+};
