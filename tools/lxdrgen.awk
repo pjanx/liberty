@@ -3,24 +3,6 @@
 # Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
-# You may read RFC 4506 for context, however it is only a source of inspiration.
-# Grammar is easy to deduce from the parser.
-#
-# Native types: bool, u{8,16,32,64}, i{8,16,32,64}, string
-#
-# Don't define any new types, unless you hate yourself, then it's okay to do so.
-# Backends tend to be a pain in the arse, for different reasons.
-#
-# All numbers are encoded in big-endian byte order.
-# Booleans are one byte each.
-# Strings must be valid UTF-8, use u8<> to lift that restriction.
-# String and array lengths are encoded as u32.
-# Enumeration values automatically start at 1, and are encoded as i8.
-# Any struct or union field may be a variable-length array.
-#
-# Message framing is done externally, but is advised to also prefix u32 lengths,
-# unless this role is already filled by, e.g., WebSocket.
-#
 # Usage: env LC_ALL=C awk -f lxdrgen.awk -f lxdrgen-{c,go,mjs}.awk \
 #  -v PrefixCamel=Foo foo.lxdr > foo.{c,go,mjs} | {clang-format,gofmt,...}
 

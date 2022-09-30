@@ -17,6 +17,42 @@ All development is done on Linux, but other POSIX-compatible operating systems
 should be supported as well.  They have an extremely low priority, however, and
 I'm not testing them at all, with the exception of OpenBSD.
 
+Tools
+-----
+This project also hosts a number of supporting scripts written in portable AWK:
+
+asciiman.awk::
+	A fallback manual page generator for AsciiDoc documents,
+	motivated by the hugeness of AsciiDoc's and Asciidoctor's dependency trees.
+	It uses the _man_ macro package.
+
+cmake-parser.awk::
+	Parses the CMake language to the extent that is necessary to reliably
+	extract project versions.  Its greatest limitation is its inability
+	to expand variables, which would require a full interpreter.
+
+cmake-dump.awk::
+	This can be used in conjunction with the previous script to dump CMake
+	scripts in a normalized format for further processing.
+
+lxdrgen.awk::
+	Protocol code generator for a variant of XDR,
+	which is link:libertyxdr.adoc[documented separately].
+	Successfully employed in https://git.janouch.name/p/xK[xK].
+
+lxdrgen-c.awk::
+	LibertyXDR backend that builds on top of the C pseudolibrary.
+
+lxdrgen-go.awk::
+	LibertyXDR backend for Go, supporting _encoding/json_ interfaces.  It also
+	produces optimized JSON marshallers (however, note that the _json.Marshaler_
+	interface is bound to be underperforming, due to the amount of otherwise
+	avoidable memory allocations it necessitates).
+
+lxdrgen-mjs.awk::
+	LibertyXDR backend for Javascript, currently for decoding only.
+	It cuts a corner by not using BigInts, on par with `JSON.parse()`.
+
 Contributing and Support
 ------------------------
 Use https://git.janouch.name/p/liberty to report any bugs, request features,

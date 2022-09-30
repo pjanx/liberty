@@ -1,0 +1,108 @@
+libertyxdr(7)
+=============
+:doctype: manpage
+
+Name
+----
+LibertyXDR - an XDR-derived IDL and data serialization format
+
+Description
+-----------
+*LibertyXDR* is an interface description language, as well as a data
+serialization format, that has been largely derived from XDR, though notably
+simplified.
+
+Conventions
+~~~~~~~~~~~
+User-defined types should be named in *CamelCase*, field names in *snake_case*,
+and constants in *SCREAMING_SNAKE_CASE*.  Code generators will convert these to
+whatever is appropriate in their target language.
+
+Primitive data types
+~~~~~~~~~~~~~~~~~~~~
+Like in XDR, all data is serialized in the network byte order, i.e., big-endian.
+
+ * *void*: 0 bytes
++
+This is a dummy type that cannot be assigned a field name.
+
+ * *bool*: 1 byte 
++
+This is a boolean value: 0 means _false_, any other value means _true_.
+
+ * *u8*, *u16*, *u32*, *u64*: 1, 2, 4, and 8 bytes respectively
++
+These are unsigned integers.
+
+ * *i8*, *i16*, *i32*, *i64*: 1, 2, 4, and 8 bytes respectively
++
+These are signed integers in two's complement.
+
+ * *string*: implicitly prefixed by its length as a *u32*,
+   then immediately followed by its contents, with no trailing NUL byte
++
+This is a valid UTF-8 string without a byte order mark.  Note that strings are
+always unbounded, unlike in XDR.
+
+Constants
+~~~~~~~~~
+At the top level of a document, outside other definitions, you can define
+typeless integer constants:
+
+ const VERSION = 1;
+
+The value can be either a name of another previously defined constant,
+or an immediate decimal value, which may not contain leading zeros.
+
+Enumerations
+~~~~~~~~~~~~
+An *enum* is an *i8* with uniquely named values, in their own namespace.
+
+Values can be either specified explicitly, in the same way as with a constant,
+or they can be left implicit, in which case names assume a value that is one
+larger than their predecessor.  Zero is reserved for internal use, thus
+enumerations implicitly begin with a value of one.  For example, these form
+a sequence from one to three:
+
+ enum Vehicle { CAR, LORRY = 2, PLANE, };
+
+Structures
+~~~~~~~~~~
+A *struct* is a sequence of fields, specified by their type, and their chosen
+name.  You can add a *<>* suffix to change a field to an array, in which case
+it is implicitly preceded by a *u32* specifying its length in terms of its
+elements.
+
+Unlike in XDR, there is no padding between subsequent fields, and type
+definitions can be arbitrarily syntactically nested, as in C.
+
+ struct StockReport {
+   u8 version;       // Version of this report.
+   struct Item {
+     Vehicle kind;   // The vehicle in question.
+     i32 count;      // How many vehicle of that kind there are.
+   } items<>;        // Reported items.
+ };
+
+Unions
+~~~~~~
+A *union* is a kind of structure whose fields depend on the value of its first
+and always-present field, which must be a tag *enum*:
+
+ union VehicleDetails switch (Vehicle kind) {
+ case CAR:   void;
+ case LORRY: i8 axles;
+ case PLANE: i8 engines;
+ };
+
+All possible enumeration values must be named, and there is no *case*
+fall-through.
+
+Framing
+-------
+Unless this role is already filled by, e.g., WebSocket, _LibertyXDR_ structures
+should be prefixed by their byte length in the *u32* format, once serialized.
+
+See also
+--------
+_XDR: External Data Representation Standard_, RFC 4506

@@ -53,6 +53,17 @@ foreach (name ${tests})
 	add_test (NAME test-${name} COMMAND test-${name})
 endforeach ()
 
+# --- Tools --------------------------------------------------------------------
+
+# Test the AsciiDoc manual page generator for a successful parse
+set (ASCIIMAN ${PROJECT_SOURCE_DIR}/tools/asciiman.awk)
+add_custom_command (OUTPUT libertyxdr.7
+	COMMAND env LC_ALL=C awk -f ${ASCIIMAN}
+		"${PROJECT_SOURCE_DIR}/libertyxdr.adoc" > libertyxdr.7
+	DEPENDS libertyxdr.adoc ${ASCIIMAN}
+	COMMENT "Generating man page for libertyxdr" VERBATIM)
+add_custom_target (docs ALL DEPENDS libertyxdr.7)
+
 # Test CMake script parsing
 add_test (test-cmake-parser
 	env LC_ALL=C awk -f ${PROJECT_SOURCE_DIR}/tools/cmake-parser.awk
