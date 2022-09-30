@@ -6,13 +6,13 @@
 # This is not intended to produce great output, merely useful output.
 # As such, input documents should restrict themselves as follows:
 #
-#  - Attributes cannot be passed on the command line.
 #  - In-line formatting sequences must not overlap,
 #    cannot be escaped, and cannot span lines.
 #  - Heading underlines must match in byte length exactly.
 #  - Only a small subset of syntax is supported overall.
 #
 # Also beware that the output has only been tested with GNU troff.
+# Attributes can be passed via environment variables starting with "asciidoc-".
 
 function fatal(message) {
 	print ".\\\" " FILENAME ":" FNR ": fatal error: " message
@@ -20,11 +20,18 @@ function fatal(message) {
 	exit 1
 }
 
-function expand(s,   attr) {
+function getattribute(name) {
+	if (!(name in Attrs) && ("asciidoc-" name) in ENVIRON)
+		Attrs[name] = ENVIRON["asciidoc-" name]
+	return Attrs[name]
+}
+
+function expand(s,   attr, v) {
 	# TODO: This should not expand unknown attribute names.
 	while (match(s, /[{][^{}]*[}]/)) {
-		attr = substr(s, RSTART + 1, RLENGTH - 2)
-		s = substr(s, 1, RSTART - 1) Attrs[attr] substr(s, RSTART + RLENGTH)
+		s = substr(s, 1, RSTART - 1) \
+			getattribute(substr(s, RSTART + 1, RLENGTH - 2)) \
+			substr(s, RSTART + RLENGTH)
 	}
 	return s
 }
@@ -66,7 +73,11 @@ NR == 1 {
 
 	# Requesting tbl(1), even though we currently do not support tables.
 	print "'\\\" t"
-	print ".TH \"" toupper(name) "\" \"" section "\""
+	printf ".TH \"%s\" \"%s\" \"\" \"%s\"",
+		toupper(name), section, getattribute("mansource")
+	if (getattribute("manmanual"))
+		printf " \"%s\"", getattribute("manmanual")
+	print ""
 
 	# Hyphenation is indeed rather annoying, in particular with long links.
 	print ".nh"
