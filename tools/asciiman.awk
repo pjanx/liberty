@@ -72,46 +72,43 @@ NR == 1 {
 	print ".nh"
 }
 
+function format(line,    v) {
+	# Pass-through, otherwise useful for hacks, is a bit of a lie here,
+	# and formatting doesn't fully respect word boundaries.
+	while (line) {
+		if (match(line, /^[+][+][+][^+]+[+][+][+]/)) {
+			v = v substr(line, RSTART + 3, RLENGTH - 6)
+		} else if (match(line, /^__[^_]+__/)) {
+			v = v "\\fI" substr(line, RSTART + 2, RLENGTH - 4) "\\fP"
+		} else if (match(line, /^[*][*][^*]+[*][*]/)) {
+			v = v "\\fB" substr(line, RSTART + 2, RLENGTH - 4) "\\fP"
+		} else if (match(line, /^_[^_]+_/) &&
+			substr(line, RSTART + RLENGTH) !~ /^[[:alnum:]]/) {
+			v = v "\\fI" substr(line, RSTART + 1, RLENGTH - 2) "\\fP"
+		} else if (match(line, /^[*][^*]+[*]/) &&
+			substr(line, RSTART + RLENGTH) !~ /^[[:alnum:]]/) {
+			v = v "\\fB" substr(line, RSTART + 1, RLENGTH - 2) "\\fP"
+		} else {
+			v = v substr(line, 1, 1)
+			line = substr(line, 2)
+			continue
+		}
+		line = substr(line, RSTART + RLENGTH)
+	}
+	return v
+}
+
 function inline(line) {
 	if (!line) {
 		print ".sp"
 		return
 	}
 
-	line = escape(expand(line))
+	line = format(escape(expand(line)))
 
 	# Strip empty URL descriptions, otherwise useful for demarking the end.
 	while (match(line, /[^[:space:]]+\[\]/)) {
 		line = substr(line, 1, RSTART + RLENGTH - 3) \
-			 substr(line, RSTART + RLENGTH)
-	}
-
-	# Pass-through, otherwise useful for hacks, is a lie here.
-	while (match(line, /[+][+][+][^+]+[+][+][+]/)) {
-		line = substr(line, 1, RSTART - 1) \
-			 substr(line, RSTART + 3, RLENGTH - 6) \
-			 substr(line, RSTART + RLENGTH)
-	}
-
-	# Italic and bold formatting doesn't respect any word boundaries.
-	while (match(line, /__[^_]+__/)) {
-		line = substr(line, 1, RSTART - 1) \
-			 "\\fI" substr(line, RSTART + 2, RLENGTH - 4) "\\fP" \
-			 substr(line, RSTART + RLENGTH)
-	}
-	while (match(line, /_[^_]+_/)) {
-		line = substr(line, 1, RSTART - 1) \
-			 "\\fI" substr(line, RSTART + 1, RLENGTH - 2) "\\fP" \
-			 substr(line, RSTART + RLENGTH)
-	}
-	while (match(line, /[*][*][^*]+[*][*]/)) {
-		line = substr(line, 1, RSTART - 1) \
-			 "\\fB" substr(line, RSTART + 2, RLENGTH - 4) "\\fP" \
-			 substr(line, RSTART + RLENGTH)
-	}
-	while (match(line, /[*][^*]+[*]/)) {
-		line = substr(line, 1, RSTART - 1) \
-			 "\\fB" substr(line, RSTART + 1, RLENGTH - 2) "\\fP" \
 			 substr(line, RSTART + RLENGTH)
 	}
 
