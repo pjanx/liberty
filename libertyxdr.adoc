@@ -9,7 +9,7 @@ LibertyXDR - an XDR-derived IDL and data serialization format
 Description
 -----------
 *LibertyXDR* is an interface description language, as well as a data
-serialization format, that has been largely derived from XDR, though notably
+serialization format.  It is largely derived from XDR, though notably
 simplified.
 
 Conventions

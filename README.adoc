@@ -1,21 +1,22 @@
 liberty
 =======
 
-'liberty' is a pseudolibrary of all the common C code I have written for various
-projects.  I used to copy-paste large swaths of code with minimal changes to it
+'liberty' is a pseudolibrary largely consisting of reusable C code for my
+various projects.  I used to copy-paste large swaths of it with minimal changes,
 and it slowly became awfully painful to synchronize.  The project can be thought
 of as a successor to my other C library, libxtnd.
 
 You are supposed to import it as a git submodule and include the main source
-file directly everywhere you need it.  Everything is declared "static".  I have
-come to the conclusion that this style of C programming suits me the best, as it
-allows me to nearly forget about the mess that are header files.
+file directly everywhere you need it, setting feature flags as appropriate.
+Everything is declared "static".  I have come to the conclusion that this style
+of C programming suits me the best, as it allows me to nearly forget about the
+mess that are header files.
 
 The API is intentionally unstable, which allows for easy refactoring.
 
 All development is done on Linux, but other POSIX-compatible operating systems
-should be supported as well.  They have an extremely low priority, however, and
-I'm not testing them at all, with the exception of OpenBSD.
+should be generally supported as well.  They have an extremely low priority,
+however, and I'm not testing them at all, perhaps with the exception of macOS.
 
 Tools
 -----
