@@ -1,4 +1,4 @@
-# asciiman.awk: stupid AsciiDoc to manual page converter
+# asciiman.awk: simplified AsciiDoc to manual page converter
 #
 # Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
@@ -11,13 +11,17 @@
 #  - Heading underlines must match in byte length exactly.
 #  - Only a small subset of syntax is supported overall.
 #
-# Also beware that the output has only been tested with GNU troff.
+# Also beware that the output has only been tested with GNU troff and mandoc.
 # Attributes can be passed via environment variables starting with "asciidoc-".
 
 function fatal(message) {
 	print ".\\\" " FILENAME ":" FNR ": fatal error: " message
 	print FILENAME ":" FNR ": fatal error: " message > "/dev/stderr"
 	exit 1
+}
+
+function haveattribute(name) {
+	return name in Attrs || ("asciidoc-" name) in ENVIRON
 }
 
 function getattribute(name) {
@@ -27,13 +31,15 @@ function getattribute(name) {
 }
 
 function expand(s,   attr, v) {
-	# TODO: This should not expand unknown attribute names.
 	while (match(s, /[{][^{}]*[}]/)) {
-		s = substr(s, 1, RSTART - 1) \
-			getattribute(substr(s, RSTART + 1, RLENGTH - 2)) \
-			substr(s, RSTART + RLENGTH)
+		attr = substr(s, RSTART + 1, RLENGTH - 2)
+		if (haveattribute(attr))
+			v = v substr(s, 1, RSTART - 1) getattribute(attr)
+		else
+			v = v substr(s, 1, RSTART + RLENGTH - 1)
+		s = substr(s, RSTART + RLENGTH)
 	}
-	return s
+	return v s
 }
 
 function escape(s) {
@@ -109,12 +115,20 @@ function format(line,    v) {
 	return v
 }
 
+function flushspace() {
+	if (NeedSpace) {
+		print ".sp"
+		NeedSpace = 0
+	}
+}
+
 function inline(line) {
 	if (!line) {
-		print ".sp"
+		NeedSpace = 1
 		return
 	}
 
+	flushspace()
 	line = format(escape(expand(line)))
 
 	# Strip empty URL descriptions, otherwise useful for demarking the end.
@@ -145,15 +159,21 @@ function process(firstline) {
 		return 0
 	}
 
+	# mandoc(1) automatically precedes section headers with blank lines.
 	if (length(firstline) == length($0) && /^-+$/) {
 		print ".SH \"" escape(toupper(expand(firstline))) "\""
+		NeedSpace = 0
 		return 0
 	}
 	if (length(firstline) == length($0) && /^~+$/) {
 		print ".SS \"" escape(expand(firstline)) "\""
+		NeedSpace = 0
 		return 0
 	}
+
 	if (firstline ~ /^(-{4,}|[.]{4,})$/) {
+		flushspace()
+
 		print ".if n .RS 4"
 		print ".nf"
 		print ".fam C"
@@ -172,12 +192,14 @@ function process(firstline) {
 		return 0
 	}
 	if (match(firstline, /^\/\//)) {
-		print ".\\\" " firstline
+		print ".\\\"" substr(firstline, RSTART + RLENGTH)
 		return 1
 	}
 
 	# We generally assume these block end with a blank line.
 	if (match(firstline, /^[[:space:]]*[*][[:space:]]+/)) {
+		flushspace()
+
 		# Bullet magic copied over from AsciiDoc/Asciidoctor generators.
 		print ".RS 4"
 		print ".ie n \\{\\"
@@ -198,10 +220,12 @@ function process(firstline) {
 				break
 		}
 		print ".RE"
-		print ".sp"
+		NeedSpace = 1
 		return !!$0
 	}
 	if (match(firstline, /^[[:space:]]+/)) {
+		flushspace()
+
 		print ".if n .RS 4"
 		print ".nf"
 		print ".fam C"
@@ -233,7 +257,7 @@ function process(firstline) {
 				break
 		}
 		print ".RE"
-		print ".sp"
+		NeedSpace = 1
 		return !!$0
 	}
 	inline(firstline)
