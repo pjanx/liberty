@@ -20,21 +20,17 @@ function fatal(message) {
 	exit 1
 }
 
-function haveattribute(name) {
-	return name in Attrs || ("asciidoc-" name) in ENVIRON
+BEGIN {
+	for (name in ENVIRON)
+		if (match(name, /^asciidoc-/))
+			Attrs[substr(name, RSTART + RLENGTH)] = ENVIRON[name]
 }
 
-function getattribute(name) {
-	if (!(name in Attrs) && ("asciidoc-" name) in ENVIRON)
-		Attrs[name] = ENVIRON["asciidoc-" name]
-	return Attrs[name]
-}
-
-function expand(s,   attr, v) {
-	while (match(s, /[{][^{}]*[}]/)) {
-		attr = substr(s, RSTART + 1, RLENGTH - 2)
-		if (haveattribute(attr))
-			v = v substr(s, 1, RSTART - 1) getattribute(attr)
+function expand(s,   attrname, v) {
+	while (match(s, /[{][^{}]+[}]/)) {
+		attrname = substr(s, RSTART + 1, RLENGTH - 2)
+		if (attrname in Attrs)
+			v = v substr(s, 1, RSTART - 1) Attrs[attrname]
 		else
 			v = v substr(s, 1, RSTART + RLENGTH - 1)
 		s = substr(s, RSTART + RLENGTH)
@@ -49,13 +45,20 @@ function escape(s) {
 	return s
 }
 
-function readattribute(line,    attrname, attrvalue) {
-	if (match(line, /^:[^:]*: /)) {
+function readattribute(line,    attrname) {
+	if (match(line, /^:[^:]+:$/)) {
+		Attrs[substr(line, RSTART + 1, RLENGTH - 2)] = ""
+	} else if (match(line, /^:[^:]+!:$/)) {
+		delete Attrs[substr(line, RSTART + 1, RLENGTH - 3)]
+	} else if (match(line, /^:![^:]+:$/)) {
+		delete Attrs[substr(line, RSTART + 2, RLENGTH - 3)]
+	} else if (match(line, /^:[^:]+: /)) {
 		attrname = substr(line, RSTART + 1, RLENGTH - 3)
-		attrvalue = substr(line, RSTART + RLENGTH)
-		Attrs[attrname] = expand(attrvalue)
-		return 1
+		Attrs[attrname] = expand(substr(line, RSTART + RLENGTH))
+	} else {
+		return 0
 	}
+	return 1
 }
 
 NR == 1 {
@@ -80,9 +83,9 @@ NR == 1 {
 	# Requesting tbl(1), even though we currently do not support tables.
 	print "'\\\" t"
 	printf ".TH \"%s\" \"%s\" \"\" \"%s\"",
-		toupper(name), section, getattribute("mansource")
-	if (getattribute("manmanual"))
-		printf " \"%s\"", getattribute("manmanual")
+		toupper(name), section, Attrs["mansource"]
+	if ("manmanual" in Attrs)
+		printf " \"%s\"", Attrs["manmanual"]
 	print ""
 
 	# Hyphenation is indeed rather annoying, in particular with long links.
