@@ -1,6 +1,6 @@
 # asciiman.awk: simplified AsciiDoc to manual page converter
 #
-# Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
+# Copyright (c) 2022 - 2023, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
 # This is not intended to produce great output, merely useful output.
@@ -92,6 +92,47 @@ NR == 1 {
 	print ".nh"
 }
 
+function readattrlist(line, posattrs, namedattrs,    name, value, n) {
+	if (!match(line, /^\[.*\]$/))
+		return 0
+
+	line = expand(substr(line, RSTART + 1, RLENGTH - 2))
+	while (line) {
+		name = ""
+		if (match(line, /^[[:alnum:]][[:alnum:]-]*/)) {
+			value = substr(line, RSTART, RLENGTH)
+			if (match(substr(line, RSTART + RLENGTH),
+					/^[[:space:]]*=[[:space:]]*/)) {
+				name = value
+				line = substr(line, 1 + length(name) + RLENGTH)
+			}
+		}
+
+		# The quoting syntax actually is awful like this.
+		if (match(line, /^"(\\.|[^"\\])*"/)) {
+			value = substr(line, RSTART + 1, RLENGTH - 2)
+			gsub(/\\"/, "\"", value)
+		} else if (match(line, /^'(\\.|[^'\\])*'/)) {
+			value = substr(line, RSTART + 1, RLENGTH - 2)
+			gsub(/\\'/, "'", value)
+		} else {
+			match(line, /^[^,]*/)
+			value = substr(line, RSTART, RLENGTH)
+			sub(/[[:space:]]*$/, "", value)
+		}
+
+		line = substr(line, RSTART + RLENGTH)
+		sub(/^[[:space:]]*,[[:space:]]*/, "", line)
+		if (!name)
+			posattrs[++n] = value
+		else if (value == "None")
+			delete namedattrs[name]
+		else
+			namedattrs[name] = value
+	}
+	return 1
+}
+
 function format(line,    v) {
 	# Pass-through, otherwise useful for hacks, is a bit of a lie here,
 	# and formatting doesn't fully respect word boundaries.
@@ -154,12 +195,23 @@ function inline(line) {
 }
 
 # Returns 1 iff the left-over $0 should be processed further.
-function process(firstline) {
+function process(firstline,     posattrs, namedattrs) {
 	if (readattribute(firstline))
 		return 0
 	if (getline <= 0) {
 		inline(firstline)
 		return 0
+	}
+
+	# Block attribute list lines.
+	delete posattrs[0]
+	delete namedattrs[0]
+	while (readattrlist(firstline, posattrs, namedattrs)) {
+		firstline = $0
+		if (getline <= 0) {
+			inline(firstline)
+			return 0
+		}
 	}
 
 	# mandoc(1) automatically precedes section headers with blank lines.
@@ -199,7 +251,7 @@ function process(firstline) {
 		return 1
 	}
 
-	# We generally assume these block end with a blank line.
+	# We generally assume these blocks end with a blank line.
 	if (match(firstline, /^[[:space:]]*[*][[:space:]]+/)) {
 		flushspace()
 
