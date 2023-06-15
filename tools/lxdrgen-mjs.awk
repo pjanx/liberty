@@ -185,14 +185,14 @@ function codegen_struct(name, cg) {
 
 function codegen_union_tag(d, cg) {
 	cg["tagtype"] = d["type"]
-	cg["tagname"] = d["name"]
+	cg["tagname"] = decapitalize(snaketocamel(d["name"]))
 }
 
 function codegen_union_struct(name, casename, cg, scg,     structname) {
 	append(scg, "methods",
 		"\n" \
 		"\tconstructor() {\n" \
-		"\t\tthis." decapitalize(snaketocamel(cg["tagname"])) \
+		"\t\tthis." cg["tagname"] \
 			" = " cg["tagtype"] "." snaketocamel(casename) "\n" \
 		"\t}\n")
 
@@ -209,7 +209,7 @@ function codegen_union_struct(name, casename, cg, scg,     structname) {
 }
 
 function codegen_union(name, cg,    tagvar) {
-	tagvar = decapitalize(snaketocamel(cg["tagname"]))
+	tagvar = cg["tagname"]
 
 	print ""
 	print "export function deserialize" name "(r) {"

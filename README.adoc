@@ -54,6 +54,9 @@ lxdrgen-mjs.awk::
 	LibertyXDR backend for Javascript, currently for decoding only.
 	It cuts a corner by not using BigInts, on par with `JSON.parse()`.
 
+lxdrgen-swift.awk::
+	LibertyXDR backend for the Swift programming language.
+
 Contributing and Support
 ------------------------
 Use https://git.janouch.name/p/liberty to report any bugs, request features,

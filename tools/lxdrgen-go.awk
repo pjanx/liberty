@@ -441,7 +441,7 @@ function codegen_struct(name, cg,    gotype) {
 
 function codegen_union_tag(d, cg) {
 	cg["tagtype"] = d["type"]
-	cg["tagname"] = d["name"]
+	cg["tagname"] = snaketocamel(d["name"])
 	# The tag is implied from the type of struct stored in the interface.
 }
 
@@ -450,8 +450,8 @@ function codegen_union_struct(name, casename, cg, scg,     structname, init) {
 	structname = name snaketocamel(casename)
 	codegen_struct(structname, scg)
 
-	init = CodegenGoType[structname] "{" snaketocamel(cg["tagname"]) \
-		": " decapitalize(snaketocamel(cg["tagname"])) "}"
+	init = CodegenGoType[structname] "{" cg["tagname"] \
+		": " decapitalize(cg["tagname"]) "}"
 	append(cg, "unmarshal",
 		"\tcase " CodegenGoType[cg["tagtype"]] snaketocamel(casename) ":\n" \
 		"\t\ts := " init "\n" \
@@ -467,7 +467,7 @@ function codegen_union_struct(name, casename, cg, scg,     structname, init) {
 		"\t\tu.Interface = &s\n")
 }
 
-function codegen_union(name, cg,    gotype, tagfield, tagvar) {
+function codegen_union(name, cg,    gotype, tagvar) {
 	gotype = PrefixCamel name
 	print "type " gotype " struct {"
 	print "\tInterface any"
@@ -481,18 +481,17 @@ function codegen_union(name, cg,    gotype, tagfield, tagvar) {
 	print "}"
 	print ""
 
-	tagfield = snaketocamel(cg["tagname"])
-	tagvar = decapitalize(tagfield)
+	tagvar = decapitalize(cg["tagname"])
 	print "func (u *" gotype ") UnmarshalJSON(data []byte) (err error) {"
 	print "\tvar t struct {"
-	print "\t\t" tagfield " " CodegenGoType[cg["tagtype"]] \
+	print "\t\t" cg["tagname"] " " CodegenGoType[cg["tagtype"]] \
 		" `json:\"" tagvar "\"`"
 	print "\t}"
 	print "\tif err := json.Unmarshal(data, &t); err != nil {"
 	print "\t\treturn err"
 	print "\t}"
 	print ""
-	print "\tswitch " tagvar " := t." tagfield "; " tagvar " {"
+	print "\tswitch " tagvar " := t." cg["tagname"] "; " tagvar " {"
 	print cg["unmarshal"] "\tdefault:"
 	print "\t\terr = errors.New(`unsupported value: ` + " tagvar ".String())"
 	print "\t}"

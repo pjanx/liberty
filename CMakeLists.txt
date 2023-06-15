@@ -72,7 +72,7 @@ add_test (test-cmake-parser
 # Test protocol code generation
 set (lxdrgen_outputs)
 set (lxdrgen_base "${PROJECT_BINARY_DIR}/lxdrgen.lxdr")
-foreach (backend c go mjs)
+foreach (backend c go mjs swift)
 	list (APPEND lxdrgen_outputs ${lxdrgen_base}.${backend})
 	add_custom_command (OUTPUT ${lxdrgen_base}.${backend}
 		COMMAND env LC_ALL=C awk
@@ -107,4 +107,12 @@ if (NODE_EXECUTABLE)
 	add_test (test-lxdrgen-mjs ${NODE_EXECUTABLE} -c ${lxdrgen_base}.mjs)
 else ()
 	message (WARNING "Cannot test generated protocol code for Javascript")
+endif ()
+
+find_program (SWIFTC_EXECUTABLE swiftc)
+if (SWIFTC_EXECUTABLE)
+	add_test (test-lxdrgen-swift
+		${SWIFTC_EXECUTABLE} -typecheck ${lxdrgen_base}.swift)
+else ()
+	message (WARNING "Cannot test generated protocol code for Swift")
 endif ()
