@@ -1,6 +1,6 @@
 # lxdrgen.awk: an XDR-derived code generator for network protocols.
 #
-# Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
+# Copyright (c) 2022 - 2023, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
 # Usage: env LC_ALL=C awk -f lxdrgen.awk -f lxdrgen-{c,go,mjs}.awk \
@@ -28,9 +28,10 @@ function snaketocamel(s) {
 }
 
 function decapitalize(s) {
-	if (match(s, /[[:upper:]][[:lower:]]/)) {
+	if (match(s, /^[[:upper:]][[:lower:]]/))
 		return tolower(substr(s, 1, 1)) substr(s, 2)
-	}
+	if (match(s, /^[[:upper:]]$/))
+		return tolower(s)
 	return s
 }
 
