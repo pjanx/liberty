@@ -32,13 +32,6 @@
 #define LIBERTY_WANT_PROTO_MPD
 
 #include "../liberty.c"
-#include "../liberty-tui.c"
-
-static bool
-app_is_character_in_locale (ucs4_t ch)
-{
-	return ch < 128;
-}
 
 // --- UTF-8 -------------------------------------------------------------------
 
@@ -211,19 +204,6 @@ test_config_item_parse (const uint8_t *data, size_t size)
 		config_item_destroy (item);
 }
 
-// --- TUI ---------------------------------------------------------------------
-
-static void
-test_attrs_decode (const uint8_t *data, size_t size)
-{
-	struct str wrap = str_make ();
-	str_append_data (&wrap, data, size);
-
-	attrs_decode (wrap.str);
-
-	str_free (&wrap);
-}
-
 // --- MPD ---------------------------------------------------------------------
 
 static void
@@ -266,7 +246,6 @@ LLVMFuzzerInitialize (int *argcp, char ***argvp)
 	REGISTER (fcgi_parser_push)
 	REGISTER (fcgi_nv_parser_push)
 	REGISTER (config_item_parse)
-	REGISTER (attrs_decode)
 	REGISTER (mpd_client_process_input)
 
 	char **argv = *argvp, *option = "-test=", *name = NULL;
