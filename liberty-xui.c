@@ -47,9 +47,9 @@
 #include <unicase.h>
 
 #include <termios.h>
-#ifndef TIOCGWINSZ
+#ifdef HAVE_RESIZETERM
 #include <sys/ioctl.h>
-#endif  // ! TIOCGWINSZ
+#endif  // HAVE_RESIZETERM
 
 // ncurses is notoriously retarded for input handling, and in past versions
 // used to process mouse events unreliably.  Moreover, rxvt-unicode only
