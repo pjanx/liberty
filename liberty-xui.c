@@ -1030,7 +1030,6 @@ x11_font_destroy (struct x11_font *self)
 	LIST_FOR_EACH (struct x11_font_link, iter, self->list)
 		x11_font_link_destroy (iter);
 	free (self);
-
 }
 
 /// Find or instantiate a font that can render the character given by cp.
@@ -1161,8 +1160,10 @@ x11_widget_font (struct widget *self)
 	unsigned style = 0;
 	if (self->attrs & A_BOLD)
 		style |= X11_FONT_BOLD;
+#ifdef A_ITALIC
 	if (self->attrs & A_ITALIC)
 		style |= X11_FONT_ITALIC;
+#endif  // A_ITALIC
 	if (self->extended_attrs & XUI_ATTR_MONOSPACE)
 		style |= X11_FONT_MONOSPACE;
 
