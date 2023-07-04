@@ -29,7 +29,7 @@ link_directories (${libssl_LIBRARY_DIRS})
 foreach (extra iconv rt)
 	find_library (extra_lib_${extra} ${extra})
 	if (extra_lib_${extra})
-		list (APPEND common_libraries ${extra})
+		list (APPEND common_libraries ${extra_lib_${extra}})
 	endif ()
 endforeach ()
 
