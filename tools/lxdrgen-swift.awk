@@ -246,7 +246,7 @@ function codegen_union_struct(name, casename, cg, scg,     swifttype) {
 		delete scg[i]
 }
 
-function codegen_union(name, cg,    swifttype, init) {
+function codegen_union(name, cg, exhaustive,    swifttype, init) {
 	# Classes don't have automatic member-wise initializers,
 	# thus using structs and protocols.
 	swifttype = PrefixCamel name
@@ -255,6 +255,10 @@ function codegen_union(name, cg,    swifttype, init) {
 	print "\tvar " cg["tagname"] ": " CodegenSwiftType[cg["tagtype"]] " { get }"
 	print "}"
 
+	if (!exhaustive)
+		append(cg, "cases", "\tdefault:\n" \
+			"\t\tthrow RelayReader.ReadError.unexpectedValue\n")
+
 	init = decapitalize(swifttype)
 	print ""
 	print "public func " init \
@@ -262,11 +266,7 @@ function codegen_union(name, cg,    swifttype, init) {
 	print "\tlet " cg["tagname"] ": " CodegenSwiftType[cg["tagtype"]] \
 		" = try from.read()"
 	print "\tswitch " cg["tagname"] " {"
-	# TODO: Only generate the default if there are remaining values,
-	# so that swiftc doesn't produce warnings.
-	print cg["cases"] "\tdefault:"
-	print "\t\tthrow RelayReader.ReadError.unexpectedValue"
-	print"\t}"
+	print cg["cases"] "\t}"
 	print "}"
 
 	CodegenSwiftType[name] = swifttype

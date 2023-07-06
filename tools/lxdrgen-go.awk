@@ -467,7 +467,7 @@ function codegen_union_struct(name, casename, cg, scg,     structname, init) {
 		"\t\tu.Interface = &s\n")
 }
 
-function codegen_union(name, cg,    gotype, tagvar) {
+function codegen_union(name, cg, exhaustive,    gotype, tagvar) {
 	gotype = PrefixCamel name
 	print "type " gotype " struct {"
 	print "\tInterface any"

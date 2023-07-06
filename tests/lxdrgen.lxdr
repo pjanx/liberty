@@ -20,4 +20,9 @@ struct Struct {
 	case NOTHING:
 		void;
 	} u<>;
+
+	union Onion switch (Enum tag) {
+	case NOTHING:
+		void;
+	} o;
 };

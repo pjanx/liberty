@@ -259,7 +259,7 @@ function codegen_union_struct( \
 		"\t\tbreak;\n")
 }
 
-function codegen_union(name, cg,    f, ctype, funcname) {
+function codegen_union(name, cg, exhaustive,    f, ctype, funcname) {
 	ctype = "union " PrefixLower cameltosnake(name)
 	print ""
 	print ctype " {"

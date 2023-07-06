@@ -208,7 +208,7 @@ function codegen_union_struct(name, casename, cg, scg,     structname) {
 		"\t}\n")
 }
 
-function codegen_union(name, cg,    tagvar) {
+function codegen_union(name, cg, exhaustive,    tagvar) {
 	tagvar = cg["tagname"]
 
 	print ""

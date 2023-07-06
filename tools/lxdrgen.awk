@@ -217,7 +217,8 @@ function defstruct(    name, d, cg) {
 	return name
 }
 
-function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i, unseen) {
+function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i,
+		unseen, exhaustive) {
 	delete cg[0]
 	delete scg[0]
 	delete d[0]
@@ -258,9 +259,14 @@ function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i, unseen) {
 	if (tagvalue)
 		codegen_union_struct(name, tagvalue, cg, scg)
 
-	# What remains non-zero in unseen[2..] is simply not recognized/allowed.
+	# Unseen cases are simply not recognized/allowed.
+	exhaustive = 1
+	for (i in unseen)
+		if (i && unseen[i])
+			exhaustive = 0
+
 	Types[name] = "union"
-	codegen_union(name, cg)
+	codegen_union(name, cg, exhaustive)
 	return name
 }
 
