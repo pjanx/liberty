@@ -36,7 +36,7 @@ function codegen_begin() {
 	print "// Code generated from " FILENAME ". DO NOT EDIT."
 	print "import Foundation"
 	print ""
-	print "public struct RelayReader {"
+	print "public struct " PrefixCamel "Reader {"
 	print "\tpublic var data: Data"
 	print ""
 	print "\tpublic enum ReadError: Error {"
@@ -102,7 +102,7 @@ function codegen_begin() {
 	print "\t}"
 	print "}"
 	print ""
-	print "public struct RelayWriter {"
+	print "public struct " PrefixCamel "Writer {"
 	print "\tpublic var data = Data()"
 	print ""
 	print "\tpublic mutating func append<T: FixedWidthInteger>(_ number: T) {"
@@ -123,8 +123,8 @@ function codegen_begin() {
 	print "\t\tdata.append(bytes)"
 	print "\t}"
 	print ""
-	print "\tpublic mutating func append<" \
-		"T: RawRepresentable<Int8>>(_ value: T) {"
+	print "\tpublic mutating func append<T: " \
+		"RawRepresentable<Int8>>(_ value: T) {"
 	print "\t\tappend(value.rawValue)"
 	print "\t}"
 	print ""
@@ -136,13 +136,14 @@ function codegen_begin() {
 	print "\t\t}"
 	print "\t}"
 	print ""
-	print "\tpublic mutating func append<T: RelayEncodable>(_ value: T) {"
+	print "\tpublic mutating func append<T: " \
+		PrefixCamel "Encodable>(_ value: T) {"
 	print "\t\tvalue.encode(to: &self)"
 	print "\t}"
 	print "}"
 	print ""
-	print "public protocol RelayEncodable { " \
-		"func encode(to: inout RelayWriter) }"
+	print "public protocol " PrefixCamel "Encodable { " \
+		"func encode(to: inout " PrefixCamel "Writer) }"
 }
 
 function codegen_constant(name, value) {
@@ -201,10 +202,10 @@ function codegen_struct(name, cg,    swifttype) {
 	print "public struct " swifttype " {\n" cg["fields"] "}"
 	print ""
 	print "extension " swifttype ": " PrefixCamel "Encodable {"
-	print "\tpublic init(from: inout RelayReader) throws {"
+	print "\tpublic init(from: inout " PrefixCamel "Reader) throws {"
 	print cg["deserialize"] "\t}"
 	print ""
-	print "\tpublic func encode(to: inout RelayWriter) {"
+	print "\tpublic func encode(to: inout " PrefixCamel "Writer) {"
 	print cg["serialize"] "\t}"
 	print "}"
 
@@ -230,10 +231,10 @@ function codegen_union_struct(name, casename, cg, scg,     swifttype) {
 	print scg["fields"] "}"
 	print ""
 	print "extension " swifttype ": " PrefixCamel "Encodable {"
-	print "\tfileprivate init(from: inout RelayReader) throws {"
+	print "\tfileprivate init(from: inout " PrefixCamel "Reader) throws {"
 	print scg["deserialize"] "\t}"
 	print ""
-	print "\tpublic func encode(to: inout RelayWriter) {"
+	print "\tpublic func encode(to: inout " PrefixCamel "Writer) {"
 	print scg["serialize"] "\t}"
 	print "}"
 
@@ -257,12 +258,12 @@ function codegen_union(name, cg, exhaustive,    swifttype, init) {
 
 	if (!exhaustive)
 		append(cg, "cases", "\tdefault:\n" \
-			"\t\tthrow RelayReader.ReadError.unexpectedValue\n")
+			"\t\tthrow " PrefixCamel "Reader.ReadError.unexpectedValue\n")
 
 	init = decapitalize(swifttype)
 	print ""
 	print "public func " init \
-		"(from: inout RelayReader) throws -> " swifttype " {"
+		"(from: inout " PrefixCamel "Reader) throws -> " swifttype " {"
 	print "\tlet " cg["tagname"] ": " CodegenSwiftType[cg["tagtype"]] \
 		" = try from.read()"
 	print "\tswitch " cg["tagname"] " {"
