@@ -17,6 +17,7 @@ struct Struct {
 	case OTHERS:
 		bool foo;
 		string bar;
+		u8 baz<>;
 	case NOTHING:
 		void;
 	} u<>;

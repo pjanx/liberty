@@ -232,7 +232,7 @@ function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i,
 
 	if (Types[tagtype] != "enum")
 		fatal("not an enum type: " tagtype)
-	codegen_union_tag(tag, cg)
+	codegen_union_tag(name, tag, cg)
 
 	split(EnumValues[tagtype], a, SUBSEP)
 	for (i in a)

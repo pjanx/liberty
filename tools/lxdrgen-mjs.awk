@@ -183,7 +183,7 @@ function codegen_struct(name, cg) {
 		delete cg[i]
 }
 
-function codegen_union_tag(d, cg) {
+function codegen_union_tag(name, d, cg) {
 	cg["tagtype"] = d["type"]
 	cg["tagname"] = decapitalize(snaketocamel(d["name"]))
 }

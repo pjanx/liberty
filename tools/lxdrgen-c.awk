@@ -222,7 +222,7 @@ function codegen_struct(name, cg,    ctype, funcname) {
 		delete cg[i]
 }
 
-function codegen_union_tag(d, cg) {
+function codegen_union_tag(name, d, cg) {
 	cg["tagtype"] = d["type"]
 	cg["tagname"] = d["name"]
 	append(cg, "fields", "\t" CodegenCType[d["type"]] " " d["name"] ";\n")
@@ -281,7 +281,7 @@ function codegen_union(name, cg, exhaustive,    f, ctype, funcname) {
 
 		CodegenDispose[name] = "\t" funcname "(&%s);\n"
 	}
-	if (cg["serialize"]) {
+	{
 		funcname = PrefixLower cameltosnake(name) "_serialize"
 		print ""
 		print "static bool\n" \
@@ -299,7 +299,7 @@ function codegen_union(name, cg, exhaustive,    f, ctype, funcname) {
 		CodegenSerialize[name] = "\tif (!" funcname "(&%s, w))\n" \
 			"\t\treturn false;\n"
 	}
-	if (cg["deserialize"]) {
+	{
 		funcname = PrefixLower cameltosnake(name) "_deserialize"
 		print ""
 		print "static bool\n" \

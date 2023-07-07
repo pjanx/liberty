@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 2.8.12)
-project (liberty C)
+project (liberty C CXX)
 
 # Moar warnings
 if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUCC)
@@ -72,7 +72,7 @@ add_test (test-cmake-parser
 # Test protocol code generation
 set (lxdrgen_outputs)
 set (lxdrgen_base "${PROJECT_BINARY_DIR}/lxdrgen.lxdr")
-foreach (backend c go mjs swift)
+foreach (backend c cpp go mjs swift)
 	list (APPEND lxdrgen_outputs ${lxdrgen_base}.${backend})
 	add_custom_command (OUTPUT ${lxdrgen_base}.${backend}
 		COMMAND env LC_ALL=C awk
@@ -91,9 +91,21 @@ add_custom_target (test-lxdrgen-outputs ALL DEPENDS ${lxdrgen_outputs})
 
 set_source_files_properties (${lxdrgen_base}.c
 	PROPERTIES HEADER_FILE_ONLY TRUE)
-add_executable (test-lxdrgen tests/lxdrgen.c ${lxdrgen_base}.c)
-target_include_directories (test-lxdrgen PUBLIC ${PROJECT_BINARY_DIR})
-add_test (NAME test-lxdrgen-c COMMAND test-lxdrgen)
+add_executable (test-lxdrgen-c tests/lxdrgen.c ${lxdrgen_base}.c)
+target_include_directories (test-lxdrgen-c PUBLIC ${PROJECT_BINARY_DIR})
+add_test (NAME test-lxdrgen-c COMMAND test-lxdrgen-c)
+
+set_source_files_properties (${lxdrgen_base}.cpp
+	PROPERTIES HEADER_FILE_ONLY TRUE)
+if (WIN32)
+	add_executable (test-lxdrgen-cpp tests/lxdrgen.cpp
+		${lxdrgen_base}.cpp tools/lxdrgen-cpp-win32.cpp)
+else ()
+	add_executable (test-lxdrgen-cpp tests/lxdrgen.cpp
+		${lxdrgen_base}.cpp tools/lxdrgen-cpp-posix.cpp)
+endif ()
+target_include_directories (test-lxdrgen-cpp PUBLIC ${PROJECT_BINARY_DIR})
+add_test (NAME test-lxdrgen-cpp COMMAND test-lxdrgen-cpp)
 
 find_program (GO_EXECUTABLE go)
 if (GO_EXECUTABLE)

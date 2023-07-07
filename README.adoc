@@ -44,6 +44,12 @@ lxdrgen.awk::
 lxdrgen-c.awk::
 	LibertyXDR backend that builds on top of the C pseudolibrary.
 
+lxdrgen-cpp.awk::
+lxdrgen-cpp-win32.cpp::
+lxdrgen-cpp-posix.cpp::
+	LibertyXDR backend for C++, primarily targeting Win32 and its wide strings.
+	Link the result together with one of the accompanied source files.
+
 lxdrgen-go.awk::
 	LibertyXDR backend for Go, supporting _encoding/json_ interfaces.  It also
 	produces optimized JSON marshallers (however, note that the _json.Marshaler_

@@ -53,6 +53,10 @@ test_ser_deser_free (void)
 			u->others.bar = str_make ();
 			for (int i = rand () % 0x30; i > 0; i--)
 				str_append_c (&u->others.bar, 0x30 + i);
+			u->others.baz_len = rand () % 0x30;
+			u->others.baz = xcalloc (1, u->others.baz_len);
+			for (uint32_t i = 0; i < u->others.baz_len; i++)
+				u->others.baz[i] = 0x30 + i;
 			break;
 		case 2:
 			u->tag = PROTO_GEN_ENUM_NOTHING;
@@ -61,6 +65,8 @@ test_ser_deser_free (void)
 			hard_assert (!"unhandled case");
 		}
 	}
+
+	a.o.tag = PROTO_GEN_ENUM_NOTHING;
 
 	struct str buf = str_make ();
 	hard_assert (proto_gen_struct_serialize (&a, &buf));
@@ -92,6 +98,9 @@ test_ser_deser_free (void)
 			hard_assert (ua->others.bar.len == ub->others.bar.len);
 			hard_assert (!memcmp (ua->others.bar.str, ub->others.bar.str,
 				ua->others.bar.len));
+			hard_assert (ua->others.baz_len == ub->others.baz_len);
+			hard_assert (!memcmp (ua->others.baz, ub->others.baz,
+				ua->others.baz_len));
 			break;
 		case PROTO_GEN_ENUM_NOTHING:
 			break;
@@ -99,6 +108,8 @@ test_ser_deser_free (void)
 			hard_assert (!"unexpected case");
 		}
 	}
+
+	hard_assert (a.o.tag == b.o.tag);
 
 	// Emulate partially deserialized data to test disposal of that.
 	for (size_t i = b.u_len - CASES; i < b.u_len; i++)
