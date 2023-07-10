@@ -23,7 +23,7 @@ bool utf8_to_wstring(const uint8_t *utf8, size_t length, std::wstring &wide) {
 		return false;
 
 	wide.resize(size);
-	return !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+	return !!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
 		(LPCCH) utf8, length, wide.data(), size);
 }
 
@@ -40,7 +40,7 @@ bool wstring_to_utf8(const std::wstring &wide, std::string &utf8) {
 		return false;
 
 	utf8.resize(size);
-	return !WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+	return !!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
 		(LPCWCH) wide.data(), wide.size(), utf8.data(), size, NULL, NULL);
 }
 
