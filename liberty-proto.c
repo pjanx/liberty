@@ -1911,14 +1911,14 @@ mpd_client_connect_unix (struct mpd_client *self, const char *address,
 	// Expand tilde if needed
 	char *expanded = resolve_filename (address, xstrdup);
 
-	struct sockaddr_un sun;
-	sun.sun_family = AF_UNIX;
-	strncpy (sun.sun_path, expanded, sizeof sun.sun_path);
-	sun.sun_path[sizeof sun.sun_path - 1] = 0;
+	struct sockaddr_un sau;
+	sau.sun_family = AF_UNIX;
+	strncpy (sau.sun_path, expanded, sizeof sau.sun_path);
+	sau.sun_path[sizeof sau.sun_path - 1] = 0;
 
 	free (expanded);
 
-	if (connect (fd, (struct sockaddr *) &sun, sizeof sun))
+	if (connect (fd, (struct sockaddr *) &sau, sizeof sau))
 	{
 		error_set (e, "%s: %s", "connect", strerror (errno));
 		xclose (fd);
