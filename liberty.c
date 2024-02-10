@@ -3552,6 +3552,8 @@ write_file_safe (const char *filename, const void *data, size_t data_len,
 {
 	// XXX: ideally we would also open the directory, use *at() versions
 	//   of functions and call fsync() on the directory as appropriate
+	// FIXME: this should behave similarly to mkstemp(), just with 0666;
+	//   as it is, this function is not particularly safe
 	char *temp = xstrdup_printf ("%s.new", filename);
 	bool success = write_file (temp, data, data_len, e);
 	if (success && !(success = !rename (temp, filename)))
