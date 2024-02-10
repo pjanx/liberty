@@ -1,7 +1,7 @@
 /*
  * liberty-xui.c: the ultimate C unlibrary: hybrid terminal/X11 UI
  *
- * Copyright (c) 2016 - 2023, Přemysl Eric Janouch <p@janouch.name>
+ * Copyright (c) 2016 - 2024, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
@@ -17,6 +17,7 @@
  */
 
 // This file includes some common stuff to build terminal/X11 applications with.
+// It assumes you've already included liberty.c, and may include liberty-xdg.c.
 
 #include <ncurses.h>
 
@@ -66,6 +67,9 @@ enum { XUI_KEYMOD_DOUBLE_CLICK = 1 << 15 };
 #include <X11/keysym.h>
 #include <X11/XKBlib.h>
 #include <X11/Xft/Xft.h>
+
+#define LIBERTY_XDG_WANT_X11
+#include "liberty-xdg.c"
 #endif  // LIBERTY_XUI_WANT_X11
 
 // The application needs to implement these.
@@ -690,7 +694,10 @@ struct xui
 	XftDraw *xft_draw;                  ///< Xft rendering context
 	struct x11_font *xft_fonts;         ///< Font collection
 	char *x11_selection;                ///< CLIPBOARD selection
+	struct xdg_xsettings x11_xsettings; ///< XSETTINGS
 
+	int32_t x11_double_click_time;      ///< Maximum delay for double clicks
+	int32_t x11_double_click_distance;  ///< Maximum distance for double clicks
 	const char *x11_fontname;           ///< Fontconfig font name
 	const char *x11_fontname_monospace; ///< Fontconfig monospace font name
 	XRenderColor *x_fg;                 ///< Foreground per attribute
@@ -1375,6 +1382,7 @@ x11_destroy (void)
 	LIST_FOR_EACH (struct x11_font, font, g_xui.xft_fonts)
 		x11_font_destroy (font);
 	cstr_set (&g_xui.x11_selection, NULL);
+	xdg_xsettings_free (&g_xui.x11_xsettings);
 
 	free (g_xui.x_fg);
 	free (g_xui.x_bg);
@@ -1623,9 +1631,10 @@ on_x11_input_event (XEvent *ev)
 	unsigned int button = ev->xbutton.button;
 	int modifiers = x11_state_to_modifiers (ev->xbutton.state);
 	if (ev->type == ButtonPress
-	 && ev->xbutton.time - last_press_event.xbutton.time < 500
-	 && abs (last_press_event.xbutton.x - x) < 5
-	 && abs (last_press_event.xbutton.y - y) < 5
+	 && ev->xbutton.time - last_press_event.xbutton.time
+		< (Time) g_xui.x11_double_click_time
+	 && abs (last_press_event.xbutton.x - x) < g_xui.x11_double_click_distance
+	 && abs (last_press_event.xbutton.y - y) < g_xui.x11_double_click_distance
 	 && last_press_event.xbutton.button == button)
 	{
 		modifiers |= XUI_KEYMOD_DOUBLE_CLICK;
@@ -1891,6 +1900,13 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 
 	x11_init_attributes (app_attrs, app_attrs_len);
 
+	// https://www.freedesktop.org/wiki/Specifications/XSettingsRegistry/
+	// TODO: Try to use Xft/{Antialias,DPI,HintStyle,Hinting,RGBA}
+	//   from XSETTINGS.  Sadly, Gtk/FontName is in the Pango format,
+	//   which is rather difficult to parse.
+	g_xui.x11_xsettings = xdg_xsettings_make ();
+	xdg_xsettings_update (&g_xui.x11_xsettings, g_xui.dpy);
+
 	if (!FcInit ())
 		print_warning ("Fontconfig initialization failed");
 	if (!(g_xui.xft_fonts = x11_font_open (0)))
@@ -1941,6 +1957,25 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 			&name, 1, XUTF8StringStyle, &prop))
 		XSetWMName (g_xui.dpy, g_xui.x11_window, &prop);
 	XFree (prop.value);
+
+	// It should not be outlandish to expect to find a program icon,
+	// although it should be possible to use a "DBus well-known name".
+	const char *icon_theme_name = NULL;
+	const struct xdg_xsettings_setting *setting =
+		str_map_find (&g_xui.x11_xsettings.settings, "Net/IconThemeName");
+	if (setting != NULL && setting->type == XDG_XSETTINGS_STRING)
+		icon_theme_name = setting->string.str;
+	icon_theme_set_window_icon (g_xui.dpy,
+		g_xui.x11_window, icon_theme_name, name);
+
+	if ((setting = str_map_find (&g_xui.x11_xsettings.settings,
+			"Net/DoubleClickTime"))
+	 && setting->type == XDG_XSETTINGS_INTEGER && setting->integer >= 0)
+		g_xui.x11_double_click_time = setting->integer;
+	if ((setting = str_map_find (&g_xui.x11_xsettings.settings,
+			"Net/DoubleClickDistance"))
+	 && setting->type == XDG_XSETTINGS_INTEGER && setting->integer >= 0)
+		g_xui.x11_double_click_distance = setting->integer;
 
 	// TODO: It is possible to do, e.g., on-the-spot.
 	XIMStyle im_style = XIMPreeditNothing | XIMStatusNothing;
@@ -2147,11 +2182,10 @@ xui_preinit (void)
 	// Presumably, although not necessarily; unsure if queryable at all.
 	g_xui.focused = true;
 
-	// TODO: Try to use Gtk/FontName from the _XSETTINGS_S%d selection,
-	//   as well as Net/DoubleClick*.  See the XSETTINGS proposal for details.
-	//   https://www.freedesktop.org/wiki/Specifications/XSettingsRegistry/
-	//   Note that this needs an X11 connection already.
 #ifdef LIBERTY_XUI_WANT_X11
+	// Note that XSETTINGS overrides some values in the init.
+	g_xui.x11_double_click_time = 500;
+	g_xui.x11_double_click_distance = 5;
 	g_xui.x11_fontname = "sans\\-serif-11";
 	g_xui.x11_fontname_monospace = "monospace-11";
 #endif  // LIBERTY_XUI_WANT_X11
