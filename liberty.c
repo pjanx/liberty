@@ -1,7 +1,7 @@
 /*
  * liberty.c: the ultimate C unlibrary
  *
- * Copyright (c) 2014 - 2022, Přemysl Eric Janouch <p@janouch.name>
+ * Copyright (c) 2014 - 2024, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
@@ -651,6 +651,60 @@ str_pack_u64 (struct str *self, uint64_t x)
 #define str_pack_i16(self, x)  str_pack_u16 ((self), (uint16_t) (x))
 #define str_pack_i32(self, x)  str_pack_u32 ((self), (uint32_t) (x))
 #define str_pack_i64(self, x)  str_pack_u64 ((self), (uint64_t) (x))
+
+// --- Reading binary numbers --------------------------------------------------
+
+// Doing this byte by byte prevents unaligned memory access issues.
+
+static uint64_t
+peek_u64be (const uint8_t *p)
+{
+	return (uint64_t) p[0] << 56 | (uint64_t) p[1] << 48
+		| (uint64_t) p[2] << 40 | (uint64_t) p[3] << 32
+		| (uint64_t) p[4] << 24 | (uint64_t) p[5] << 16 | p[6] << 8 | p[7];
+}
+
+static uint32_t
+peek_u32be (const uint8_t *p)
+{
+	return (uint32_t) p[0] << 24 | (uint32_t) p[1] << 16 | p[2] << 8 | p[3];
+}
+
+static uint16_t
+peek_u16be (const uint8_t *p)
+{
+	return (uint16_t) p[0] << 8 | p[1];
+}
+
+static uint64_t
+peek_u64le (const uint8_t *p)
+{
+	return (uint64_t) p[7] << 56 | (uint64_t) p[6] << 48
+		| (uint64_t) p[5] << 40 | (uint64_t) p[4] << 32
+		| (uint64_t) p[3] << 24 | (uint64_t) p[2] << 16 | p[1] << 8 | p[0];
+}
+
+static uint32_t
+peek_u32le (const uint8_t *p)
+{
+	return (uint32_t) p[3] << 24 | (uint32_t) p[2] << 16 | p[1] << 8 | p[0];
+}
+
+static uint16_t
+peek_u16le (const uint8_t *p)
+{
+	return (uint16_t) p[1] << 8 | p[0];
+}
+
+struct peeker
+{
+	uint64_t (*u64) (const uint8_t *);
+	uint32_t (*u32) (const uint8_t *);
+	uint16_t (*u16) (const uint8_t *);
+};
+
+static const struct peeker peeker_be = {peek_u64be, peek_u32be, peek_u16be};
+static const struct peeker peeker_le = {peek_u64le, peek_u32le, peek_u16le};
 
 // --- Errors ------------------------------------------------------------------
 
@@ -2503,12 +2557,7 @@ msg_reader_get (struct msg_reader *self, size_t *len)
 		return NULL;
 
 	uint8_t *x = (uint8_t *) self->buf.str + self->offset;
-	uint64_t msg_len
-		= (uint64_t) x[0] << 56 | (uint64_t) x[1] << 48
-		| (uint64_t) x[2] << 40 | (uint64_t) x[3] << 32
-		| (uint64_t) x[4] << 24 | (uint64_t) x[5] << 16
-		| (uint64_t) x[6] << 8  | (uint64_t) x[7];
-
+	uint64_t msg_len = peek_u64be (x);
 	if (msg_len < sizeof msg_len)
 	{
 		// The message is shorter than its header
@@ -2573,8 +2622,7 @@ static bool
 msg_unpacker_u16 (struct msg_unpacker *self, uint16_t *value)
 {
 	UNPACKER_INT_BEGIN
-	*value
-		= (uint16_t) x[0] << 8  | (uint16_t) x[1];
+	*value = peek_u16be (x);
 	return true;
 }
 
@@ -2582,9 +2630,7 @@ static bool
 msg_unpacker_u32 (struct msg_unpacker *self, uint32_t *value)
 {
 	UNPACKER_INT_BEGIN
-	*value
-		= (uint32_t) x[0] << 24 | (uint32_t) x[1] << 16
-		| (uint32_t) x[2] << 8  | (uint32_t) x[3];
+	*value = peek_u32be (x);
 	return true;
 }
 
@@ -2592,11 +2638,7 @@ static bool
 msg_unpacker_u64 (struct msg_unpacker *self, uint64_t *value)
 {
 	UNPACKER_INT_BEGIN
-	*value
-		= (uint64_t) x[0] << 56 | (uint64_t) x[1] << 48
-		| (uint64_t) x[2] << 40 | (uint64_t) x[3] << 32
-		| (uint64_t) x[4] << 24 | (uint64_t) x[5] << 16
-		| (uint64_t) x[6] << 8  | (uint64_t) x[7];
+	*value = peek_u64be (x);
 	return true;
 }
 
