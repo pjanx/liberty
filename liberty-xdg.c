@@ -351,6 +351,7 @@ desktop_file_unescape (const char *value, bool is_list)
 			break; case 'r': str_append_c (&s, '\r');
 			break; default:  str_append_c (&s, *p);
 			}
+			escape = false;
 		}
 		else if (*p == '\\' && p[1])
 			escape = true;

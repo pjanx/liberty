@@ -36,7 +36,7 @@ endforeach ()
 # Build some unit tests
 include_directories (${PROJECT_SOURCE_DIR})
 enable_testing ()
-set (tests liberty proto)
+set (tests liberty proto xdg)
 
 pkg_check_modules (libpulse libpulse)
 if (libpulse_FOUND)
