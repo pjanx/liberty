@@ -1551,7 +1551,8 @@ x11_init_pixmap (void)
 {
 	int screen = DefaultScreen (g_xui.dpy);
 	g_xui.x11_pixmap = XCreatePixmap (g_xui.dpy, g_xui.x11_window,
-		g_xui.width, g_xui.height, DefaultDepth (g_xui.dpy, screen));
+		MAX (g_xui.width, 1), MAX (g_xui.height, 1),
+		DefaultDepth (g_xui.dpy, screen));
 
 	Visual *visual = DefaultVisual (g_xui.dpy, screen);
 	XRenderPictFormat *format = XRenderFindVisualFormat (g_xui.dpy, visual);
