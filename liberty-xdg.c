@@ -21,9 +21,11 @@
 #ifdef LIBERTY_XDG_WANT_X11
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#endif
 
+#ifdef LIBERTY_XDG_WANT_ICONS
 #include <png.h>
-#endif // LIBERTY_XDG_WANT_X11
+#endif
 
 // --- XSettings ---------------------------------------------------------------
 
@@ -200,7 +202,7 @@ fail:
 
 // --- Desktop file parser -----------------------------------------------------
 
-// Useful for parsing desktop-file-spec, icon-theme-spec, trash-spec,
+// Useful for parsing desktop-entry-spec, icon-theme-spec, trash-spec,
 // mime-apps-spec.  This code is not designed for making changes to the files.
 
 struct desktop_file
@@ -433,6 +435,8 @@ desktop_file_get_integer (struct desktop_file *self,
 // --- Icon themes -------------------------------------------------------------
 
 // This implements part of the Icon Theme Specification.
+
+#ifdef LIBERTY_XDG_WANT_ICONS
 
 struct icon_theme_icon
 {
@@ -764,3 +768,4 @@ icon_theme_set_window_icon (Display *dpy,
 }
 
 #endif // LIBERTY_XDG_WANT_X11
+#endif // LIBERTY_XDG_WANT_ICONS

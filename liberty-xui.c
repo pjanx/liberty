@@ -69,6 +69,7 @@ enum { XUI_KEYMOD_DOUBLE_CLICK = 1 << 15 };
 #include <X11/Xft/Xft.h>
 
 #define LIBERTY_XDG_WANT_X11
+#define LIBERTY_XDG_WANT_ICONS
 #include "liberty-xdg.c"
 #endif  // LIBERTY_XUI_WANT_X11
 
