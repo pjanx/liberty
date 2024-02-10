@@ -462,7 +462,7 @@ icon_theme_open (const char *path)
 {
 	volatile png_bytep buffer = NULL;
 	volatile png_bytepp row_pointers = NULL;
-	volatile struct icon_theme_icon *result = NULL;
+	struct icon_theme_icon *volatile result = NULL;
 	FILE *fp = fopen (path, "rb");
 	if (!fp)
 	{
@@ -535,7 +535,7 @@ fail:
 	free (row_pointers);
 	png_destroy_read_struct (&pngp, &infop, NULL);
 	fclose (fp);
-	return (struct icon_theme_icon *) result;
+	return result;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
