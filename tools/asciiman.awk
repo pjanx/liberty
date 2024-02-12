@@ -1,6 +1,6 @@
 # asciiman.awk: simplified AsciiDoc to manual page converter
 #
-# Copyright (c) 2022 - 2023, Přemysl Eric Janouch <p@janouch.name>
+# Copyright (c) 2022 - 2024, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
 # This is not intended to produce great output, merely useful output.
@@ -149,6 +149,11 @@ function format(line,    v) {
 		} else if (match(line, /^[*][^*]+[*]/) &&
 			substr(line, RSTART + RLENGTH) !~ /^[[:alnum:]]/) {
 			v = v "\\fB" substr(line, RSTART + 1, RLENGTH - 2) "\\fP"
+		} else if (match(line, /^`[^`]+`/) &&
+			substr(line, RSTART + RLENGTH) !~ /^[[:alnum:]]/) {
+			# Manual pages are usually already rendered in monospace;
+			# follow others, and render this in boldface.
+			v = v "\\fB" substr(line, RSTART + 1, RLENGTH - 2) "\\fP"
 		} else {
 			v = v substr(line, 1, 1)
 			line = substr(line, 2)
@@ -226,6 +231,13 @@ function process(firstline,     posattrs, namedattrs) {
 		return 0
 	}
 
+	if (firstline ~ /^--$/) {
+		flushspace()
+
+		# For now, recognize, but do not process open block delimiters.
+		InOpenBlock = !InOpenBlock
+		return 1
+	}
 	if (firstline ~ /^(-{4,}|[.]{4,})$/) {
 		flushspace()
 
