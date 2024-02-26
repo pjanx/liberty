@@ -728,9 +728,12 @@ tui_flush_buffer (struct widget *self, struct row_buffer *buf)
 {
 	move (self->y, self->x);
 
-	int space = MIN (self->width, g_xui.width - self->x);
-	row_buffer_align (buf, space, self->attrs);
-	row_buffer_flush (buf);
+	if (self->y >= 0 && self->y < g_xui.height)
+	{
+		int space = MIN (self->width, g_xui.width - self->x);
+		row_buffer_align (buf, space, self->attrs);
+		row_buffer_flush (buf);
+	}
 	row_buffer_free (buf);
 }
 
