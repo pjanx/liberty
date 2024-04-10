@@ -292,7 +292,8 @@ xreallocarray (void *o, size_t n, size_t m)
 static char *
 xstrdup (const char *s)
 {
-	return strcpy (xmalloc (strlen (s) + 1), s);
+	size_t len = strlen (s) + 1;
+	return memcpy (xmalloc (len), s, len);
 }
 
 static char *
