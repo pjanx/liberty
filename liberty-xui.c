@@ -24,12 +24,12 @@
 // It is surprisingly hard to find a good library to handle Unicode shenanigans,
 // and there's enough of those for it to be impractical to reimplement them.
 //
-//                         GLib          ICU     libunistring    utf8proc
-// Decently sized            .            .            x            x
-// Grapheme breaks           .            x            .            x
-// Character width           x            .            x            x
-// Locale handling           .            .            x            .
-// Liberal license           .            x            .            x
+//                        GLib        ICU   libunistring  utf8proc libgrapheme
+// Decently sized           .          .          x          x          x
+// Grapheme breaks          .          x          .          x          x
+// Character width          x          .          x          x          .
+// Locale handling          .          .          x          .          .
+// Liberal license          .          x          .          x          x
 //
 // Also note that the ICU API is icky and uses UTF-16 for its primary encoding.
 //
