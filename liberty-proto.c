@@ -1636,20 +1636,20 @@ mpd_client_on_ready (const struct pollfd *pfd, void *user_data)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static bool
-mpd_client_must_quote_char (char c)
-{
-	return (unsigned char) c <= ' ' || c == '"' || c == '\'';
-}
-
-static bool
 mpd_client_must_quote (const char *s)
 {
 	if (!*s)
 		return true;
 	for (; *s; s++)
-		if (mpd_client_must_quote_char (*s))
+		if ((unsigned char) *s <= ' ' || *s == '"' || *s == '\'')
 			return true;
 	return false;
+}
+
+static bool
+mpd_client_must_escape_in_quote (char c)
+{
+	return c == '"' || c == '\'' || c == '\\';
 }
 
 static void
@@ -1658,7 +1658,7 @@ mpd_client_quote (const char *s, struct str *output)
 	str_append_c (output, '"');
 	for (; *s; s++)
 	{
-		if (mpd_client_must_quote_char (*s))
+		if (mpd_client_must_escape_in_quote (*s))
 			str_append_c (output, '\\');
 		str_append_c (output, *s);
 	}
