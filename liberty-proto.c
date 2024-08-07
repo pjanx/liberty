@@ -1381,7 +1381,7 @@ struct mpd_client
 
 	// Protocol:
 
-	bool got_hello;                     ///< Got the OK MPD hello message
+	char *got_hello;                    ///< Version from OK MPD hello message
 
 	bool idling;                        ///< Sent idle as the last command
 	unsigned idling_subsystems;         ///< Subsystems we're idling for
@@ -1482,7 +1482,7 @@ mpd_client_reset (struct mpd_client *self)
 	str_reset (&self->read_buffer);
 	str_reset (&self->write_buffer);
 
-	self->got_hello = false;
+	cstr_set (&self->got_hello, NULL);
 	self->idling = false;
 	self->idling_subsystems = 0;
 	self->in_list = false;
@@ -1549,7 +1549,8 @@ mpd_client_parse_hello (struct mpd_client *self, const char *line)
 
 	// TODO: call "on_connected" now.  We should however also set up a timer
 	//   so that we don't wait on this message forever.
-	return self->got_hello = true;
+	cstr_set (&self->got_hello, xstrdup (line + sizeof hello - 1));
+	return true;
 }
 
 static bool
