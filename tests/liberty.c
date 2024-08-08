@@ -636,7 +636,7 @@ test_config_validate_nonnegative
 	return false;
 }
 
-static struct config_schema g_config_test[] =
+static const struct config_schema g_config_test[] =
 {
 	{ .name      = "foo",
 	  .comment   = "baz",
