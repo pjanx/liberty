@@ -4501,7 +4501,7 @@ struct config_item
 	}
 	value;                              ///< The value of this item
 
-	struct config_schema *schema;       ///< Schema describing this value
+	const struct config_schema *schema; ///< Schema describing this value
 	void *user_data;                    ///< User value attached by schema owner
 };
 
@@ -4653,7 +4653,7 @@ config_item_object (void)
 
 static bool
 config_schema_accepts_type
-	(struct config_schema *self, enum config_item_type type)
+	(const struct config_schema *self, enum config_item_type type)
 {
 	if (self->type == type)
 		return true;
@@ -4666,7 +4666,7 @@ config_schema_accepts_type
 
 static bool
 config_item_validate_by_schema (struct config_item *self,
-	struct config_schema *schema, struct error **e)
+	const struct config_schema *schema, struct error **e)
 {
 	struct error *error = NULL;
 	if (!config_schema_accepts_type (schema, self->type))
@@ -4687,7 +4687,7 @@ static bool
 config_item_set_from (struct config_item *self, struct config_item *source,
 	struct error **e)
 {
-	struct config_schema *schema = self->schema;
+	const struct config_schema *schema = self->schema;
 	if (!schema)
 	{
 		// Easy, we don't know what this item is
@@ -5483,7 +5483,7 @@ end:
 
 /// "user_data" is passed to allow its immediate use in validation callbacks
 static struct config_item *
-config_schema_initialize_item (struct config_schema *schema,
+config_schema_initialize_item (const struct config_schema *schema,
 	struct config_item *parent, void *user_data, struct error **warning,
 	struct error **e)
 {
@@ -5540,7 +5540,7 @@ keep_current:
 /// Assign schemas and user_data to multiple items at once;
 /// feel free to copy over and modify to suit your particular needs
 static void
-config_schema_apply_to_object (struct config_schema *schema_array,
+config_schema_apply_to_object (const struct config_schema *schema_array,
 	struct config_item *object, void *user_data)
 {
 	while (schema_array->name)
