@@ -316,7 +316,7 @@ xstrndup (const char *s, size_t n)
 #define ARRAY(type, name) type *name; size_t name ## _len, name ## _alloc;
 #define ARRAY_INIT_SIZED(a, n)                                                 \
 	BLOCK_START                                                                \
-		(a) = xcalloc (sizeof *(a), (a ## _alloc) = (n));                      \
+		(a) = xcalloc ((a ## _alloc) = (n), sizeof *(a));                      \
 		(a ## _len) = 0;                                                       \
 	BLOCK_END
 #define ARRAY_INIT(a) ARRAY_INIT_SIZED (a, 16)
@@ -398,7 +398,7 @@ strv_make (void)
 	struct strv self;
 	self.alloc = 4;
 	self.len = 0;
-	self.vector = xcalloc (sizeof *self.vector, self.alloc);
+	self.vector = xcalloc (self.alloc, sizeof *self.vector);
 	return self;
 }
 

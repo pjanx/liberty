@@ -205,8 +205,8 @@ static void
 line_editor_start (struct line_editor *self, char prompt)
 {
 	self->alloc = 16;
-	self->line = xcalloc (sizeof *self->line, self->alloc);
-	self->w = xcalloc (sizeof *self->w, self->alloc);
+	self->line = xcalloc (self->alloc, sizeof *self->line);
+	self->w = xcalloc (self->alloc, sizeof *self->w);
 	self->len = 0;
 	self->point = 0;
 	self->prompt = prompt;
