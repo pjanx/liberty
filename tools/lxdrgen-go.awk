@@ -1,6 +1,6 @@
 # lxdrgen-go.awk: Go backend for lxdrgen.awk.
 #
-# Copyright (c) 2022, Přemysl Eric Janouch <p@janouch.name>
+# Copyright (c) 2022 - 2024, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
 # This backend also enables proxying to other endpoints using JSON.
@@ -301,9 +301,11 @@ function codegen_marshal(type, f,    marshal) {
 		"\t}\n"
 }
 
-function codegen_struct_field_marshal(d, cg,    camel, f, marshal) {
+function codegen_struct_field_marshal(d, cg, isaccessor,    camel, f, marshal) {
 	camel = snaketocamel(d["name"])
 	f = "s." camel
+	if (isaccessor)
+		f = f "()"
 	if (!d["isarray"]) {
 		append(cg, "marshal",
 			"\tb = append(b, `,\"" decapitalize(camel) "\":`...)\n" \
@@ -333,7 +335,7 @@ function codegen_struct_field_marshal(d, cg,    camel, f, marshal) {
 }
 
 function codegen_struct_field(d, cg,    camel, f, serialize, deserialize) {
-	codegen_struct_field_marshal(d, cg)
+	codegen_struct_field_marshal(d, cg, 0)
 
 	camel = snaketocamel(d["name"])
 	f = "s." camel
@@ -384,15 +386,11 @@ function codegen_struct_field(d, cg,    camel, f, serialize, deserialize) {
 	}
 }
 
-function codegen_struct_tag(d, cg,    camel, f) {
-	codegen_struct_field_marshal(d, cg)
+function codegen_struct_tag(d, cg) {
+	codegen_struct_field_marshal(d, cg, 1)
 
-	camel = snaketocamel(d["name"])
-	f = "s." camel
-	append(cg, "fields", "\t" camel " " CodegenGoType[d["type"]] \
-		" `json:\"" decapitalize(camel) "\"`\n")
-	append(cg, "serialize", sprintf(CodegenSerialize[d["type"]], f))
-	# Do not deserialize here, that is already done by the containing union.
+	# Do not serialize or deserialize here,
+	# that is already done by the containing union.
 }
 
 function codegen_struct(name, cg,    gotype) {
@@ -450,13 +448,18 @@ function codegen_union_struct(name, casename, cg, scg,     structname, init) {
 	structname = name snaketocamel(casename)
 	codegen_struct(structname, scg)
 
-	init = CodegenGoType[structname] "{" cg["tagname"] \
-		": " decapitalize(cg["tagname"]) "}"
+	print "func (u *" CodegenGoType[structname] ") " cg["tagname"] "() " \
+		CodegenGoType[cg["tagtype"]] " {"
+	print "\treturn " CodegenGoType[cg["tagtype"]] snaketocamel(casename)
+	print "}"
+	print ""
+
+	init = CodegenGoType[structname] "{}"
 	append(cg, "unmarshal",
 		"\tcase " CodegenGoType[cg["tagtype"]] snaketocamel(casename) ":\n" \
 		"\t\ts := " init "\n" \
 		"\t\terr = json.Unmarshal(data, &s)\n" \
-		"\t\tu.Interface = &s\n")
+		"\t\tu.Variant = &s\n")
 	append(cg, "serialize",
 		"\tcase *" CodegenGoType[structname] ":\n" \
 		indent(sprintf(CodegenSerialize[structname], "union")))
@@ -464,20 +467,23 @@ function codegen_union_struct(name, casename, cg, scg,     structname, init) {
 		"\tcase " CodegenGoType[cg["tagtype"]] snaketocamel(casename) ":\n" \
 		"\t\ts := " init "\n" \
 		indent(sprintf(CodegenDeserialize[structname], "s")) \
-		"\t\tu.Interface = &s\n")
+		"\t\tu.Variant = &s\n")
 }
 
 function codegen_union(name, cg, exhaustive,    gotype, tagvar) {
 	gotype = PrefixCamel name
+	# This must be a struct, so that UnmarshalJSON can create concrete types.
 	print "type " gotype " struct {"
-	print "\tInterface any"
+	print "\tVariant interface {"
+	print "\t\t" cg["tagname"] "() " CodegenGoType[cg["tagtype"]]
+	print "\t}"
 	print "}"
 	print ""
 
 	# This cannot be a pointer method, it wouldn't work recursively.
 	CodegenIsMarshaler[name] = 1
 	print "func (u " gotype ") MarshalJSON() ([]byte, error) {"
-	print "\treturn u.Interface.(json.Marshaler).MarshalJSON()"
+	print "\treturn u.Variant.(json.Marshaler).MarshalJSON()"
 	print "}"
 	print ""
 
@@ -499,13 +505,15 @@ function codegen_union(name, cg, exhaustive,    gotype, tagvar) {
 	print "}"
 	print ""
 
-	# XXX: Consider changing the interface into an AppendTo/ConsumeFrom one,
-	# that would eliminate these type case switches entirely.
-	# On the other hand, it would make it possible to send unsuitable structs.
+	# XXX: Consider rather testing the type for having an AppendTo method,
+	# which would eliminate this type case switch entirely.
 	print "func (u *" gotype ") AppendTo(data []byte) ([]byte, bool) {"
 	print "\tok := true"
-	print "\tswitch union := u.Interface.(type) {"
+	print sprintf(CodegenSerialize[cg["tagtype"]],
+		"u.Variant." cg["tagname"] "()") \
+		"\tswitch union := u.Variant.(type) {"
 	print cg["serialize"] "\tdefault:"
+	print "\t\t_ = union"
 	print "\t\treturn nil, false"
 	print "\t}"
 	print "\treturn data, ok"
