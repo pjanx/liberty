@@ -145,7 +145,7 @@ function codegen_begin(    funcname) {
 	print "// " funcname " tries to serialize a string value,"
 	print "// appending it to the end of a byte stream."
 	print "func " funcname "(data []byte, s string) ([]byte, bool) {"
-	print "\tif len(s) > math.MaxUint32 {"
+	print "\tif int64(len(s)) > math.MaxUint32 {"
 	print "\t\treturn nil, false"
 	print "\t}"
 	print "\tdata = binary.BigEndian.AppendUint32(data, uint32(len(s)))"
