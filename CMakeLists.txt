@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 3.0...3.27)
 project (liberty C CXX)
 
 # Moar warnings
+set (CMAKE_CXX_STANDARD 11)
 if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUCC)
 	# -Wunused-function is pretty annoying here, as everything is static
 	set (wdisabled "-Wno-unused-function")
@@ -104,6 +105,7 @@ else ()
 	add_executable (test-lxdrgen-cpp tests/lxdrgen.cpp
 		${lxdrgen_base}.cpp tools/lxdrgen-cpp-posix.cpp)
 endif ()
+target_link_libraries (test-lxdrgen-cpp ${common_libraries})
 target_include_directories (test-lxdrgen-cpp PUBLIC ${PROJECT_BINARY_DIR})
 add_test (NAME test-lxdrgen-cpp COMMAND test-lxdrgen-cpp)
 
