@@ -45,8 +45,9 @@ lxdrgen-c.awk::
 	LibertyXDR backend that builds on top of the C pseudolibrary.
 
 lxdrgen-cpp.awk::
-lxdrgen-cpp-win32.cpp::
 lxdrgen-cpp-posix.cpp::
+lxdrgen-cpp-qt.cpp::
+lxdrgen-cpp-win32.cpp::
 	LibertyXDR backend for C++, primarily targeting Win32 and its wide strings.
 	Link the result together with one of the accompanied source files.
 
