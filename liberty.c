@@ -4833,7 +4833,8 @@ config_item_write_kv_pair (struct config_writer *self,
 		str_append_printf (self->output,
 			"%s# %s\n", indent, value->schema->comment);
 
-	bool can_use_word = true;
+	char *end = NULL;
+	bool can_use_word = ((void) strtoll (key, &end, 10), end == key);
 	for (const char *p = key; *p; p++)
 		if (!config_tokenizer_is_word_char (*p))
 			can_use_word = false;

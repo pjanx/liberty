@@ -647,7 +647,7 @@ static const struct config_schema g_config_test[] =
 	  .type      = CONFIG_ITEM_INTEGER,
 	  .validate  = test_config_validate_nonnegative,
 	  .default_  = "1" },
-	{ .name      = "foobar",
+	{ .name      = "123",
 	  .type      = CONFIG_ITEM_STRING,
 	  .default_  = "\"qux\\x01`\" \"\"`a`" },
 	{}
@@ -676,10 +676,11 @@ test_config (void)
 	config_item_destroy (invalid);
 
 	hard_assert (!strcmp ("qux\001`a",
-		config_item_get (config.root, "top.foobar", NULL)->value.string.str));
+		config_item_get (config.root, "top.123", NULL)->value.string.str));
 
 	struct str s = str_make ();
 	config_item_write (config.root, true, &s);
+	print_debug ("%s", s.str);
 	struct config_item *parsed = config_item_parse (s.str, s.len, false, NULL);
 	hard_assert (parsed);
 	config_item_destroy (parsed);
