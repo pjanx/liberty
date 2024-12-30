@@ -10,7 +10,7 @@ if ("${CMAKE_C_COMPILER_ID}" MATCHES "GNU" OR CMAKE_COMPILER_IS_GNUCC)
 endif ()
 
 # Dependencies
-set (CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include (AddThreads)
 
 find_package (PkgConfig REQUIRED)
@@ -35,7 +35,7 @@ foreach (extra iconv rt)
 endforeach ()
 
 # Build some unit tests
-include_directories (${PROJECT_SOURCE_DIR})
+include_directories ("${PROJECT_SOURCE_DIR}")
 enable_testing ()
 set (tests liberty proto xdg)
 
@@ -57,7 +57,7 @@ endforeach ()
 # --- Tools --------------------------------------------------------------------
 
 # Test the AsciiDoc manual page generator for a successful parse
-set (ASCIIMAN ${PROJECT_SOURCE_DIR}/tools/asciiman.awk)
+set (ASCIIMAN "${PROJECT_SOURCE_DIR}/tools/asciiman.awk")
 add_custom_command (OUTPUT libertyxdr.7
 	COMMAND env LC_ALL=C awk -f ${ASCIIMAN}
 		"${PROJECT_SOURCE_DIR}/libertyxdr.adoc" > libertyxdr.7
@@ -65,10 +65,14 @@ add_custom_command (OUTPUT libertyxdr.7
 	COMMENT "Generating man page for libertyxdr" VERBATIM)
 add_custom_target (docs ALL DEPENDS libertyxdr.7)
 
+# Test the --help/--version to AsciiDoc convertor
+add_test (test-help2adoc
+	env LC_ALL=C "${PROJECT_SOURCE_DIR}/tests/help2adoc.sh")
+
 # Test CMake script parsing
 add_test (test-cmake-parser
-	env LC_ALL=C awk -f ${PROJECT_SOURCE_DIR}/tools/cmake-parser.awk
-	-f ${PROJECT_SOURCE_DIR}/tools/cmake-dump.awk ${CMAKE_CURRENT_LIST_FILE})
+	env LC_ALL=C awk -f "${PROJECT_SOURCE_DIR}/tools/cmake-parser.awk"
+	-f "${PROJECT_SOURCE_DIR}/tools/cmake-dump.awk" ${CMAKE_CURRENT_LIST_FILE})
 
 # Test protocol code generation
 set (lxdrgen_outputs)
@@ -77,15 +81,15 @@ foreach (backend c cpp go mjs swift)
 	list (APPEND lxdrgen_outputs ${lxdrgen_base}.${backend})
 	add_custom_command (OUTPUT ${lxdrgen_base}.${backend}
 		COMMAND env LC_ALL=C awk
-			-f ${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk
-			-f ${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk
+			-f "${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk"
+			-f "${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk"
 			-v PrefixCamel=ProtoGen
-			${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr
+			"${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr"
 			> ${lxdrgen_base}.${backend}
 		DEPENDS
-			${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk
-			${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk
-			${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr
+			"${PROJECT_SOURCE_DIR}/tools/lxdrgen.awk"
+			"${PROJECT_SOURCE_DIR}/tools/lxdrgen-${backend}.awk"
+			"${PROJECT_SOURCE_DIR}/tests/lxdrgen.lxdr"
 		COMMENT "Generating test protocol code (${backend})" VERBATIM)
 endforeach ()
 add_custom_target (test-lxdrgen-outputs ALL DEPENDS ${lxdrgen_outputs})

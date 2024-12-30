@@ -36,6 +36,9 @@ cmake-dump.awk::
 	This can be used in conjunction with the previous script to dump CMake
 	scripts in a normalized format for further processing.
 
+help2adoc.awk::
+	Produces AsciiDoc manual pages from --version/--help output.
+
 lxdrgen.awk::
 	Protocol code generator for a variant of XDR,
 	which is link:libertyxdr.adoc[documented separately].
