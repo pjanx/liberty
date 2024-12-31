@@ -130,7 +130,7 @@ BEGIN {
 
 	if (Name !~ /[[:space:]]/)
 		ProgramName = Name
-	else if (match(Target, /[^/]+$/))
+	else if (match(Target, /[^\/]+$/))
 		ProgramName = substr(Target, RSTART, RLENGTH)
 
 	printheader(ProgramName "(1)", "=")
