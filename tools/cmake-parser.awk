@@ -75,7 +75,7 @@ function line_ending() {
 # it doesn't seem to be worth the effort.
 function expand(s,    v) {
 	v = s
-	while (match(v, /\\*[$](|ENV|CACHE)[{]/)) {
+	while (match(v, /\\*[$](ENV|CACHE)?[{]/)) {
 		if (index(substr(v, RSTART), "$") % 2 != 0) {
 			warning("variable expansion is not supported: " s)
 			return s
