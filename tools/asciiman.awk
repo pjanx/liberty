@@ -200,7 +200,7 @@ function inline(line) {
 }
 
 # Returns 1 iff the left-over $0 should be processed further.
-function process(firstline,     posattrs, namedattrs) {
+function process(firstline,     posattrs, namedattrs, ok) {
 	if (readattribute(firstline))
 		return 0
 	if (getline <= 0) {
@@ -281,9 +281,11 @@ function process(firstline,     posattrs, namedattrs) {
 		while ($0) {
 			sub(/^[[:space:]]+/, "")
 			sub(/^[+]$/, "")
-			if (!process($0) && getline <= 0)
-				fatal("unexpected EOF")
-			if (match($0, /^[[:space:]]*[*][[:space:]]+/))
+			if (!process($0) && (ok = getline) <= 0) {
+				if (ok < 0)
+					fatal("getline failed")
+				$0 = ""
+			} else if (match($0, /^[[:space:]]*[*][[:space:]]+/))
 				break
 		}
 		print ".RE"
@@ -318,9 +320,11 @@ function process(firstline,     posattrs, namedattrs) {
 		while ($0) {
 			sub(/^[[:space:]]+/, "")
 			sub(/^[+]$/, "")
-			if (!process($0) && getline <= 0)
-				fatal("unexpected EOF")
-			if (match($0, /::$/))
+			if (!process($0) && (ok = getline) <= 0) {
+				if (ok < 0)
+					fatal("getline failed")
+				$0 = ""
+			} else if (match($0, /::$/))
 				break
 		}
 		print ".RE"
