@@ -15,8 +15,8 @@ mess that are header files.
 The API is intentionally unstable, which allows for easy refactoring.
 
 All development is done on Linux, but other POSIX-compatible operating systems
-should be generally supported as well.  They have an extremely low priority,
-however, and I'm not testing them at all, perhaps with the exception of macOS.
+should be generally supported as well.  They have a lower priority, however,
+and don't receive as much testing.
 
 Tools
 -----
@@ -38,6 +38,7 @@ cmake-dump.awk::
 
 help2adoc.awk::
 	Produces AsciiDoc manual pages from --version/--help output.
+	These can then be processed by _asciiman.awk_.
 
 lxdrgen.awk::
 	Protocol code generator for a variant of XDR,
