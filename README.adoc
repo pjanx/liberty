@@ -68,6 +68,9 @@ lxdrgen-mjs.awk::
 lxdrgen-swift.awk::
 	LibertyXDR backend for the Swift programming language.
 
+wdye::
+	Compiled Lua-based Expect-like utility, intended purely for build checks.
+
 Contributing and Support
 ------------------------
 Use https://git.janouch.name/p/liberty to report any bugs, request features,

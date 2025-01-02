@@ -1,0 +1,126 @@
+wdye(1)
+=======
+:doctype: manpage
+:manmanual: wdye Manual
+:mansource: wdye {release-version}
+
+Name
+----
+wdye - what did you expect: Lua-based Expect tool
+
+Synopsis
+--------
+*wdye* _program.lua_
+
+Description
+-----------
+*wdye* executes a Lua script, providing an *expect*(1)-like API targeted
+at application testing.
+
+API
+---
+This list is logically ordered.  Uppercase names represent object types.
+
+wdye.spawn {file [, arg1, ...] [, environ=env]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Creates a new pseudoterminal, spawns the given program in it,
+and returns a _process_ object.  When *file* doesn't contain slashes,
+the program will be searched for in _PATH_.
+
+The *env* map may be used to override environment variables, notably _TERM_.
+Variables evaluating to _false_ will be removed from the environment.
+
+The program's whole process group receives SIGKILL when the _process_
+is garbage-collected.
+
+wdye.expect ([pattern1, ...])
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Waits until any pattern is ready, in order.
+When no *timeout* (or *default*) patterns are included, one is added implicitly.
+
+The function returns the matching _pattern_'s values, while replacing
+any included functions with the results of their immediate evaluation,
+passing the matching _pattern_ as their sole argument.
+
+wdye.timeout {[timeout, ] [value1, ...]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns a new timeout _pattern_.  When no *timeout* is given, which is specified
+in seconds, a default timeout value is assumed.  Any further values
+are remembered to be later processed by *expect*.
+
+wdye.continue ()
+~~~~~~~~~~~~~~~~
+Raises a _nil_ error, which is interpreted by *expect* as a signal to restart
+all processing.
+
+PROCESS.buffer
+~~~~~~~~~~~~~~
+A string with the _process_' current read buffer contents.
+
+PROCESS.term
+~~~~~~~~~~~~
+A table with the _process_' *terminfo*(5) capabilities,
+notably containing all **key_...** codes.
+This functionality may not be enabled, then this table will always be empty.
+
+PROCESS:send ([string, ...])
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Writes the given strings to the _process_' terminal slave,
+and returns the _process_ for method chaining.
+
+Beware of echoing and deadlocks, as only *expect* can read from the _process_,
+and thus consume the terminal slave's output queue.
+
+PROCESS:regex {pattern [, nocase=true] [, notransfer=true] [, value1, ...]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns a new regular expression _pattern_.  The *pattern* is a POSIX
+Extended Regular Expression.  Whether it can match NUL bytes depends on your
+system C library.
+
+When the *nocase* option is _true_, the expression will be matched
+case-insensitively.
+
+Unless the *notransfer* option is _true_, all data up until the end of the match
+will be erased from the _process_' read buffer upon a successful match.
+
+PROCESS:exact {literal [, nocase=true] [, notransfer=true] [, value1, ...]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns a new literal string _pattern_.  This behaves as if the *literal*
+had its ERE special characters quoted, and was then passed to *regex*.
+This _pattern_ can always match NUL bytes.
+
+PROCESS:eof {[notransfer=true, ] [value1, ...]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns a new end-of-file _pattern_, which matches the entire read buffer
+contents once the child process closes the terminal.
+
+PROCESS:default {[timeout, ] [notransfer=true, ] [value1, ...]}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Returns a new _pattern_ combining *wdye.timeout* with *eof*.
+
+PATTERN.process
+~~~~~~~~~~~~~~~
+A reference to the _pattern_'s respective process, or _nil_.
+
+PATTERN[group]
+~~~~~~~~~~~~~~
+For patterns that can match data, the zeroth group will be the whole matched
+input sequence.
+For *regex* patterns, positive groups relate to regular expression subgroups.
+Missing groups evaluate to _nil_.
+
+Example
+-------
+ for k, v in pairs(wdye) do _G[k] = v end
+ local rot13 = spawn {"tr", "A-Za-z", "N-ZA-Mn-za-m", environ={TERM="dumb"}}
+ rot13:send "Hello\r"
+ expect(rot13:exact {"Uryyb\r"})
+
+Reporting bugs
+--------------
+Use https://git.janouch.name/p/liberty to report bugs, request features,
+or submit pull requests.
+
+See also
+--------
+*expect*(1), *terminfo*(5), *regex*(7)
