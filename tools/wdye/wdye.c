@@ -222,6 +222,45 @@ pty_fork (int *ptrfdm, char **slave_name,
 	return pid;
 }
 
+// --- JSON --------------------------------------------------------------------
+
+static void
+write_json_string (FILE *output, const char *s, size_t len)
+{
+	fputc ('"', output);
+	for (const char *last = s, *end = s + len; s != end; last = s)
+	{
+		// Here is where you realize the asciicast format is retarded for using
+		// JSON at all.  (Consider multibyte characters at read() boundaries.)
+		int32_t codepoint = utf8_decode (&s, end - s);
+		if (codepoint < 0)
+		{
+			s++;
+			fprintf (output, "\\uFFFD");
+			continue;
+		}
+
+		switch (codepoint)
+		{
+		break; case '"':  fprintf (output, "\\\"");
+		break; case '\\': fprintf (output, "\\\\");
+		break; case '\b': fprintf (output, "\\b");
+		break; case '\f': fprintf (output, "\\f");
+		break; case '\n': fprintf (output, "\\n");
+		break; case '\r': fprintf (output, "\\r");
+		break; case '\t': fprintf (output, "\\t");
+		break; default:
+			if (!utf8_validate_cp (codepoint))
+				fprintf (output, "\\uFFFD");
+			else if (codepoint < 32)
+				fprintf (output, "\\u%04X", codepoint);
+			else
+				fwrite (last, 1, s - last, output);
+		}
+	}
+	fputc ('"', output);
+}
+
 // --- Global state ------------------------------------------------------------
 
 static struct
@@ -435,6 +474,9 @@ struct process
 	int ref_term;                       ///< Terminal information
 	struct str buffer;                  ///< Terminal input buffer
 	int status;                         ///< Process status iff pid is -1
+
+	int64_t start;                      ///< Start timestamp (Unix msec)
+	FILE *asciicast;                    ///< asciicast script dump
 };
 
 static struct process *
@@ -462,6 +504,8 @@ xlua_process_gc (lua_State *L)
 		kill (-self->pid, SIGKILL);
 	luaL_unref (L, LUA_REGISTRYINDEX, self->ref_term);
 	str_free (&self->buffer);
+	if (self->asciicast)
+		fclose (self->asciicast);
 	return 0;
 }
 
@@ -500,6 +544,14 @@ xlua_process_send (lua_State *L)
 			return luaL_error (L, "write failed: %s", strerror (errno));
 		else if (written != len)
 			return luaL_error (L, "write failed: %s", "short write");
+
+		if (self->asciicast)
+		{
+			double timestamp = (clock_msec () - self->start) / 1000.;
+			fprintf (self->asciicast, "[%f, \"i\", ", timestamp);
+			write_json_string (self->asciicast, arg, len);
+			fprintf (self->asciicast, "]\n");
+		}
 	}
 	lua_pushvalue (L, 1);
 	return 1;
@@ -665,6 +717,14 @@ process_feed (struct process *self)
 
 		print_warning ("read: %s", strerror (errno));
 		return false;
+	}
+
+	if (self->asciicast)
+	{
+		double timestamp = (clock_msec () - self->start) / 1000.;
+		fprintf (self->asciicast, "[%f, \"o\", ", timestamp);
+		write_json_string (self->asciicast, buf, n);
+		fprintf (self->asciicast, "]\n");
 	}
 
 	// TODO(p): Add match_max processing, limiting the buffer size.
@@ -888,9 +948,17 @@ spawn_protected (lua_State *L)
 	}
 	process->ref_term = luaL_ref (L, LUA_REGISTRYINDEX);
 
+	struct winsize ws = { .ws_row = 24, .ws_col = 80 };
+	if ((entry = str_map_find (&ctx->term, "lines"))
+	 && entry->kind == TERMINFO_NUMERIC)
+		ws.ws_row = entry->numeric;
+	if ((entry = str_map_find (&ctx->term, "columns"))
+	 && entry->kind == TERMINFO_NUMERIC)
+		ws.ws_col = entry->numeric;
+
 	// Step 5: Spawn the process, which gets a new process group.
 	process->pid =
-		pty_fork (&process->terminal_fd, NULL, NULL, NULL, &ctx->error);
+		pty_fork (&process->terminal_fd, NULL, NULL, &ws, &ctx->error);
 	if (process->pid < 0)
 	{
 		return luaL_error (L, "failed to spawn %s: %s",
@@ -903,6 +971,28 @@ spawn_protected (lua_State *L)
 			ctx->argv.vector[0], strerror (errno));
 		// Or we could figure out when exactly to use statuses 126 and 127.
 		_exit (EXIT_FAILURE);
+	}
+
+	// Step 6: Create a log file.
+	if (getenv ("WDYE_LOGGING"))
+	{
+		const char *name = ctx->argv.vector[0];
+		const char *last_slash = strrchr (name, '/');
+		if (last_slash)
+			name = last_slash + 1;
+
+		char *path = xstrdup_printf ("%s-%s.%d.cast",
+			PROGRAM_NAME, name, (int) process->pid);
+		if (!(process->asciicast = fopen (path, "w")))
+			print_warning ("%s: %s", path, strerror (errno));
+		free (path);
+	}
+	process->start = clock_msec ();
+	if (process->asciicast)
+	{
+		fprintf (process->asciicast, "{\"version\": 2, "
+			"\"width\": %u, \"height\": %u, \"env\": {\"TERM\": \"%s\"}}\n",
+			ws.ws_col, ws.ws_row, term);
 	}
 
 	set_cloexec (process->terminal_fd);

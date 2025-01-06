@@ -126,6 +126,12 @@ Example
  rot13:send "Hello\r"
  expect(rot13:exact {"Uryyb\r"})
 
+Environment
+-----------
+*WDYE_LOGGING*::
+	When this environment variable is present, *wdye* produces asciicast v2
+	files for every spawned program, in the current working directory.
+
 Reporting bugs
 --------------
 Use https://git.janouch.name/p/liberty to report bugs, request features,
