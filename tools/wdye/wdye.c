@@ -73,7 +73,7 @@ execvpe (const char *file, char *const argv[], char *const envp[])
 
 // This is a particularly inefficient algorithm, but it can match binary data.
 static const char *
-memmem (const struct str *haystack, const struct str *needle, bool nocase)
+str_memmem (const struct str *haystack, const struct str *needle, bool nocase)
 {
 	if (haystack->len < needle->len)
 		return NULL;
@@ -999,7 +999,7 @@ pattern_match (struct pattern *self)
 	}
 	case PATTERN_EXACT:
 	{
-		const char *match = memmem (buffer, &self->exact, self->nocase);
+		const char *match = str_memmem (buffer, &self->exact, self->nocase);
 		if (!match)
 			return false;
 

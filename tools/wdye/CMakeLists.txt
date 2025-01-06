@@ -19,7 +19,10 @@ pkg_search_module (lua REQUIRED
 
 option (WITH_CURSES "Offer terminal sequences using Curses" "${CURSES_FOUND}")
 
-include_directories ("${PROJECT_BINARY_DIR}")
+# -liconv may or may not be a part of libc
+find_path (iconv_INCLUDE_DIRS iconv.h)
+
+include_directories ("${PROJECT_BINARY_DIR}" ${iconv_INCLUDE_DIRS})
 file (CONFIGURE OUTPUT "${PROJECT_BINARY_DIR}/config.h" CONTENT [[
 #define PROGRAM_NAME "${PROJECT_NAME}"
 #define PROGRAM_VERSION "${PROJECT_VERSION}"
