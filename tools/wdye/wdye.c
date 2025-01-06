@@ -1312,7 +1312,7 @@ main (int argc, char *argv[])
 	if (luaL_loadfile (g.L, path)
 	 || lua_pcall (g.L, 0, 0, -2))
 	{
-		print_error ("%s: %s", path, lua_tostring (g.L, -1));
+		print_error ("%s", lua_tostring (g.L, -1));
 		lua_pop (g.L, 1);
 		lua_close (g.L);
 		return 1;
