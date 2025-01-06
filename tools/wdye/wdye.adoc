@@ -94,6 +94,16 @@ PROCESS:eof {[notransfer=true, ] [value1, ...]}
 Returns a new end-of-file _pattern_, which matches the entire read buffer
 contents once the child process closes the terminal.
 
+PROCESS:wait ([nowait])
+~~~~~~~~~~~~~~~~~~~~~~~
+Waits for the program to terminate, and returns three values:
+a combined status as used by `$?` in shells,
+an exit status, and a termination signal number.
+One of the latter two values will be _nil_, as appropriate.
+
+When the *nowait* option is _true_, the function returns immediately.
+If the process hasn't terminated yet, the function then returns no values.
+
 PROCESS:default {[timeout, ] [notransfer=true, ] [value1, ...]}
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Returns a new _pattern_ combining *wdye.timeout* with *eof*.

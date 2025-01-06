@@ -18,7 +18,14 @@ expect(cat:regex {"A(.*)3", nocase=true, function (p)
 	assert(p[1] == "bc12", "wrong regex group #1")
 end})
 
+assert(not cat:wait (true), "process reports exiting early")
+
 -- Send EOF (^D), test method chaining.
 cat:send("Closing...\r"):send("\004")
 local v = expect(cat:eof {true},
 	cat:default {.5, function (p) error "expected EOF, got a timeout" end})
+
+local s1, exit, signal = cat:wait ()
+assert(s1 == 0 and exit == 0 and not signal, "unexpected exit status")
+local s2 = cat:wait (true)
+assert(s1 == s2, "exit status not remembered")

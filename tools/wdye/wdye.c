@@ -431,9 +431,10 @@ static luaL_Reg xlua_pattern_table[] =
 struct process
 {
 	int terminal_fd;                    ///< Process stdin/stdout/stderr
-	pid_t pid;                          ///< Process ID
+	pid_t pid;                          ///< Process ID or -1 if collected
 	int ref_term;                       ///< Terminal information
 	struct str buffer;                  ///< Terminal input buffer
+	int status;                         ///< Process status iff pid is -1
 };
 
 static struct process *
@@ -598,6 +599,54 @@ xlua_process_default (lua_State *L)
 	return 1;
 }
 
+static int
+xlua_process_wait (lua_State *L)
+{
+	struct process *self = luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
+	bool nowait = luaL_opt(L, lua_toboolean, 2, false);
+	if (lua_gettop (L) > 2)
+		return luaL_error (L, "too many arguments");
+
+	int status = self->status;
+restart:
+	if (self->pid != -1)
+	{
+		int options = 0;
+		if (nowait)
+			options |= WNOHANG;
+
+		pid_t pid = waitpid (self->pid, &status, options);
+		if (!pid)
+			return 0;
+
+		if (pid < 0)
+		{
+			if (errno == EINTR)
+				goto restart;
+			return luaL_error (L, "waitpid: %s", strerror (errno));
+		}
+
+		// We lose the ability to reliably kill the whole process group.
+		self->status = status;
+		self->pid = -1;
+	}
+	if (WIFEXITED (status))
+	{
+		lua_pushinteger (L, WEXITSTATUS (status));
+		lua_pushinteger (L, WEXITSTATUS (status));
+		lua_pushnil (L);
+		return 3;
+	}
+	if (WIFSIGNALED (status))
+	{
+		lua_pushinteger (L, 128 + WTERMSIG (status));
+		lua_pushnil (L);
+		lua_pushinteger (L, WTERMSIG (status));
+		return 3;
+	}
+	return 0;
+}
+
 static bool
 process_feed (struct process *self)
 {
@@ -632,6 +681,7 @@ static luaL_Reg xlua_process_table[] =
 	{ "exact",      xlua_process_exact    },
 	{ "eof",        xlua_process_eof      },
 	{ "default",    xlua_process_default  },
+	{ "wait",       xlua_process_wait     },
 	{ NULL,         NULL                  }
 };
 
@@ -851,6 +901,7 @@ spawn_protected (lua_State *L)
 		execvpe (ctx->argv.vector[0], ctx->argv.vector, ctx->envv.vector);
 		print_error ("failed to spawn %s: %s",
 			ctx->argv.vector[0], strerror (errno));
+		// Or we could figure out when exactly to use statuses 126 and 127.
 		_exit (EXIT_FAILURE);
 	}
 
