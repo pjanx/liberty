@@ -608,7 +608,7 @@ process_feed (struct process *self)
 	{
 		if (errno == EINTR)
 			return true;
-#if __linux__
+#ifdef __linux__
 		// https://unix.stackexchange.com/a/538271
 		if (errno == EIO)
 			return false;
@@ -637,25 +637,59 @@ static luaL_Reg xlua_process_table[] =
 
 // --- Terminal ----------------------------------------------------------------
 
+struct terminfo_entry
+{
+	enum { TERMINFO_BOOLEAN, TERMINFO_NUMERIC, TERMINFO_STRING } kind;
+	unsigned numeric;
+	char string[];
+};
+
 #ifdef WITH_CURSES
 
 static bool
 load_terminfo (const char *term, struct str_map *strings)
 {
-	// TODO(p): See if we can get away with using a bogus FD.
+	// Neither ncurses nor NetBSD curses need an actual terminal FD passed.
+	// We don't want them to read out the winsize, we just read the database.
 	int err = 0;
 	TERMINAL *saved_term = set_curterm (NULL);
-	if (setupterm ((char *) term, STDOUT_FILENO, &err) != OK)
+	if (setupterm ((char *) term, -1, &err) != OK)
 	{
 		set_curterm (saved_term);
 		return false;
 	}
 
+	for (size_t i = 0; boolfnames[i]; i++)
+	{
+		int flag = tigetflag (boolnames[i]);
+		if (flag <= 0)
+			continue;
+
+		struct terminfo_entry *entry = xcalloc (1, sizeof *entry + 1);
+		*entry = (struct terminfo_entry) { TERMINFO_BOOLEAN, true };
+		str_map_set (strings, boolfnames[i], entry);
+	}
+	for (size_t i = 0; numfnames[i]; i++)
+	{
+		int num = tigetnum (numnames[i]);
+		if (num < 0)
+			continue;
+
+		struct terminfo_entry *entry = xcalloc (1, sizeof *entry + 1);
+		*entry = (struct terminfo_entry) { TERMINFO_NUMERIC, num };
+		str_map_set (strings, numfnames[i], entry);
+	}
 	for (size_t i = 0; strfnames[i]; i++)
 	{
-		const char *value = tigetstr (strnames[i]);
-		if (value && value != (char *) -1)
-			str_map_set (strings, strfnames[i], xstrdup (value));
+		const char *str = tigetstr (strnames[i]);
+		if (!str || str == (const char *) -1)
+			continue;
+
+		size_t len = strlen (str) + 1;
+		struct terminfo_entry *entry = xcalloc (1, sizeof *entry + len);
+		*entry = (struct terminfo_entry) { TERMINFO_STRING, 0 };
+		memcpy (entry + 1, str, len);
+		str_map_set (strings, strfnames[i], entry);
 	}
 	del_curterm (set_curterm (saved_term));
 	return true;
@@ -668,7 +702,7 @@ load_terminfo (const char *term, struct str_map *strings)
 struct spawn_context
 {
 	struct str_map env;                 ///< Subprocess environment map
-	struct str_map term;                ///< terminfo database strings
+	struct str_map term;                ///< terminfo database
 	struct strv envv;                   ///< Subprocess environment vector
 	struct strv argv;                   ///< Subprocess argument vector
 
@@ -789,11 +823,17 @@ spawn_protected (lua_State *L)
 	// This could be made into an object that can adjust winsize/termios.
 	lua_createtable (L, 0, ctx->term.len);
 	struct str_map_iter iter = str_map_iter_make (&ctx->term);
-	const char *value = NULL;
-	while ((value = str_map_iter_next (&iter)))
+	const struct terminfo_entry *entry = NULL;
+	while ((entry = str_map_iter_next (&iter)))
 	{
 		lua_pushstring (L, iter.link->key);
-		lua_pushstring (L, value);
+		switch (entry->kind)
+		{
+		break; case TERMINFO_BOOLEAN: lua_pushboolean (L, true);
+		break; case TERMINFO_NUMERIC: lua_pushinteger (L, entry->numeric);
+		break; case TERMINFO_STRING:  lua_pushstring (L, entry->string);
+		break; default:               lua_pushnil (L);
+		}
 		lua_settable (L, -3);
 	}
 	process->ref_term = luaL_ref (L, LUA_REGISTRYINDEX);
