@@ -31,7 +31,7 @@ The *env* map may be used to override environment variables, notably _TERM_.
 Variables evaluating to _false_ will be removed from the environment.
 
 The program's whole process group receives SIGKILL when the _process_
-is garbage-collected.
+is garbage-collected, unless *wait* has collected the process group leader.
 
 wdye.expect ([pattern1, ...])
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,6 +56,10 @@ all processing.
 PROCESS.buffer
 ~~~~~~~~~~~~~~
 A string with the _process_' current read buffer contents.
+
+PROCESS.pid
+~~~~~~~~~~~
+An integer with the _process_' process ID, or -1 if *wait* has collected it.
 
 PROCESS.term
 ~~~~~~~~~~~~

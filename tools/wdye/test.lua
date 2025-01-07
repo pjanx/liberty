@@ -25,7 +25,9 @@ cat:send("Closing...\r"):send("\004")
 local v = expect(cat:eof {true},
 	cat:default {.5, function (p) error "expected EOF, got a timeout" end})
 
+assert(cat.pid > 0, "process has no ID")
 local s1, exit, signal = cat:wait ()
 assert(s1 == 0 and exit == 0 and not signal, "unexpected exit status")
+assert(cat.pid < 0, "process still has an ID")
 local s2 = cat:wait (true)
 assert(s1 == s2, "exit status not remembered")

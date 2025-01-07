@@ -175,7 +175,7 @@ pty_fork (int *ptrfdm, char **slave_name,
 	char *pts_name = NULL;
 	if ((fdm = ptym_open (&pts_name)) < 0)
 	{
-		error_set (e, "can’t open master pty: %s", strerror (errno));
+		error_set (e, "can't open master pty: %s", strerror (errno));
 		return -1;
 	}
 	if (slave_name != NULL)
@@ -194,7 +194,7 @@ pty_fork (int *ptrfdm, char **slave_name,
 		if (setsid () < 0)
 			exit_fatal ("setsid: %s", strerror (errno));
 		if ((fds = ptys_open (pts_name)) < 0)
-			exit_fatal ("can’t open slave pty: %s", strerror (errno));
+			exit_fatal ("can't open slave pty: %s", strerror (errno));
 		xclose (fdm);
 
 #if defined BSD
@@ -401,7 +401,7 @@ xlua_pattern_index (lua_State *L)
 		if (!strcmp (key, "process"))
 			lua_rawgeti (L, LUA_REGISTRYINDEX, self->ref_process);
 		else
-			return luaL_argerror (L, 2, "not a readable property");
+			return luaL_error (L, "not a readable property: %s", key);
 		return 1;
 	}
 
@@ -411,8 +411,8 @@ xlua_pattern_index (lua_State *L)
 	case PATTERN_REGEX:
 	{
 		const regmatch_t *m = self->matches + group;
-		if (group < 0 || group > self->regex->re_nsub
-		 || m->rm_so < 0 || m->rm_eo < 0 || m->rm_eo > self->input.len)
+		if (group < 0 || (size_t) group > self->regex->re_nsub
+		 || m->rm_so < 0 || m->rm_eo < 0 || (size_t) m->rm_eo > self->input.len)
 			lua_pushnil (L);
 		else
 			lua_pushlstring (L,
@@ -428,7 +428,7 @@ xlua_pattern_index (lua_State *L)
 			lua_pushlstring (L, self->input.str, self->input.len);
 		return 1;
 	default:
-		return luaL_argerror (L, 2, "indexing unavailable for this pattern");
+		return luaL_argerror (L, 1, "indexing unavailable for this pattern");
 	}
 }
 
@@ -519,10 +519,12 @@ xlua_process_index (lua_State *L)
 
 	if (!strcmp (key, "buffer"))
 		lua_pushlstring (L, self->buffer.str, self->buffer.len);
+	else if (!strcmp (key, "pid"))
+		lua_pushinteger (L, self->pid);
 	else if (!strcmp (key, "term"))
 		lua_rawgeti (L, LUA_REGISTRYINDEX, self->ref_term);
 	else
-		return luaL_argerror (L, 2, "not a readable property");
+		return luaL_error (L, "not a readable property: %s", key);
 	return 1;
 }
 
@@ -542,7 +544,7 @@ xlua_process_send (lua_State *L)
 		ssize_t written = write (self->terminal_fd, arg, len);
 		if (written == -1)
 			return luaL_error (L, "write failed: %s", strerror (errno));
-		else if (written != len)
+		else if (written != (ssize_t) len)
 			return luaL_error (L, "write failed: %s", "short write");
 
 		if (self->asciicast)
@@ -560,7 +562,7 @@ xlua_process_send (lua_State *L)
 static int
 xlua_process_regex (lua_State *L)
 {
-	struct process *self = luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
+	(void) luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
 	luaL_checktype (L, 2, LUA_TTABLE);
 	if (lua_gettop (L) != 2)
 		return luaL_error (L, "too many arguments");
@@ -593,7 +595,7 @@ xlua_process_regex (lua_State *L)
 static int
 xlua_process_exact (lua_State *L)
 {
-	struct process *self = luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
+	(void) luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
 	luaL_checktype (L, 2, LUA_TTABLE);
 	if (lua_gettop (L) != 2)
 		return luaL_error (L, "too many arguments");
@@ -618,7 +620,7 @@ xlua_process_exact (lua_State *L)
 static int
 xlua_process_eof (lua_State *L)
 {
-	struct process *self = luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
+	(void) luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
 	luaL_checktype (L, 2, LUA_TTABLE);
 	if (lua_gettop (L) != 2)
 		return luaL_error (L, "too many arguments");
@@ -634,7 +636,7 @@ xlua_process_eof (lua_State *L)
 static int
 xlua_process_default (lua_State *L)
 {
-	struct process *self = luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
+	(void) luaL_checkudata (L, 1, XLUA_PROCESS_METATABLE);
 	luaL_checktype (L, 2, LUA_TTABLE);
 	if (lua_gettop (L) != 2)
 		return luaL_error (L, "too many arguments");
@@ -1081,7 +1083,7 @@ expect_prepare_pattern (struct expect_context *ctx, struct pattern *p)
 {
 	str_reset (&p->input);
 	if (p->kind == PATTERN_REGEX)
-		for (int i = 0; i <= p->regex->re_nsub; i++)
+		for (size_t i = 0; i <= p->regex->re_nsub; i++)
 			p->matches[i] = (regmatch_t) { .rm_so = -1, .rm_eo = -1 };
 
 	if (p->kind == PATTERN_REGEX
@@ -1168,7 +1170,7 @@ pattern_match (struct pattern *self)
 		if (regexec (self->regex, buffer->str,
 			self->regex->re_nsub + 1, self->matches, flags))
 		{
-			for (int i = 0; i <= self->regex->re_nsub; i++)
+			for (size_t i = 0; i <= self->regex->re_nsub; i++)
 				self->matches[i] = (regmatch_t) { .rm_so = -1, .rm_eo = -1 };
 			return false;
 		}
