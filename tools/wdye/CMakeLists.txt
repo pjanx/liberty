@@ -38,5 +38,5 @@ if (WITH_CURSES)
 	target_link_libraries (wdye PUBLIC ${CURSES_LIBRARIES})
 endif ()
 
-add_test (NAME simple COMMAND wdye "${PROJECT_SOURCE_DIR}/test.lua")
+add_test (NAME wdye COMMAND wdye "${PROJECT_SOURCE_DIR}/test.lua")
 include (CTest)
