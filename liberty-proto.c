@@ -1594,6 +1594,8 @@ mpd_client_parse_kv (char *line, char **value)
 static void
 mpd_client_update_poller (struct mpd_client *self)
 {
+	if (self->state != MPD_CONNECTED)
+		return;
 	poller_fd_set (&self->socket_event,
 		self->write_buffer.len ? (POLLIN | POLLOUT) : POLLIN);
 }
