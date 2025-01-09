@@ -1376,9 +1376,9 @@ xlua_panic (lua_State *L)
 int
 main (int argc, char *argv[])
 {
-	if (argc != 2)
+	if (argc < 2)
 	{
-		fprintf (stderr, "Usage: %s program.lua\n", argv[0]);
+		fprintf (stderr, "Usage: %s program.lua [args...]\n", argv[0]);
 		return 1;
 	}
 
@@ -1399,16 +1399,20 @@ main (int argc, char *argv[])
 	luaL_setfuncs (g.L, xlua_pattern_table, 0);
 	lua_pop (g.L, 1);
 
-	const char *path = argv[1];
+	luaL_checkstack (g.L, argc, NULL);
+
 	lua_pushcfunction (g.L, xlua_error_handler);
-	if (luaL_loadfile (g.L, path)
-	 || lua_pcall (g.L, 0, 0, -2))
-	{
-		print_error ("%s", lua_tostring (g.L, -1));
-		lua_pop (g.L, 1);
-		lua_close (g.L);
-		return 1;
-	}
+	if (luaL_loadfile (g.L, strcmp (argv[1], "-") ? argv[1] : NULL))
+		goto error;
+	for (int i = 2; i < argc; i++)
+		lua_pushstring (g.L, argv[i]);
+	if (lua_pcall (g.L, argc - 2, 0, 1))
+		goto error;
 	lua_close (g.L);
 	return 0;
+
+error:
+	print_error ("%s", lua_tostring (g.L, -1));
+	lua_close (g.L);
+	return 1;
 }
