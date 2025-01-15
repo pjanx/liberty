@@ -890,10 +890,11 @@ environ_map_serialize (struct str_map *env, struct strv *envv)
 static int
 spawn_protected (lua_State *L)
 {
-	struct spawn_context *ctx = lua_touserdata (L, 1);
+	struct spawn_context *ctx = lua_touserdata (L, lua_upvalueindex (1));
+	luaL_checktype (L, 1, LUA_TTABLE);
 
 	// Step 1: Prepare process environment.
-	if (xlua_getfield (L, 2, "environ", LUA_TTABLE, true))
+	if (xlua_getfield (L, 1, "environ", LUA_TTABLE, true))
 	{
 		environ_map_update (&ctx->env, L);
 		lua_pop (L, 1);
@@ -913,11 +914,11 @@ spawn_protected (lua_State *L)
 #endif
 
 	// Step 3: Prepare process command line.
-	size_t argc = lua_rawlen (L, 2);
+	size_t argc = lua_rawlen (L, 1);
 	for (size_t i = 1; i <= argc; i++)
 	{
 		lua_pushinteger (L, i);
-		lua_rawget (L, 2);
+		lua_rawget (L, 1);
 		const char *arg = lua_tostring (L, -1);
 		if (!arg)
 			return luaL_error (L, "spawn arguments must be strings");
@@ -1004,23 +1005,24 @@ spawn_protected (lua_State *L)
 static int
 xlua_spawn (lua_State *L)
 {
-	luaL_checktype (L, 1, LUA_TTABLE);
-
 	lua_pushcfunction (L, xlua_error_handler);
-	lua_pushcfunction (L, spawn_protected);
+	lua_insert (L, 1);
+
+	struct spawn_context ctx = {};
+	lua_pushlightuserdata (L, &ctx);
+	lua_pushcclosure (L, spawn_protected, 1);
+	lua_insert (L, 2);
 
 	// There are way too many opportunities for Lua to throw,
 	// so maintain a context to clean up in one go.
-	struct spawn_context ctx = spawn_context_make ();
-	lua_pushlightuserdata (L, &ctx);
-	lua_rotate (L, 1, -1);
-	int result = lua_pcall (L, 2, 1, -4);
+	ctx = spawn_context_make ();
+	int result = lua_pcall (L, lua_gettop (L) - 2, 1, 1);
 	spawn_context_free (&ctx);
 	if (result)
 		return lua_error (L);
 
 	// Remove the error handler ("good programming practice").
-	lua_remove (L, -2);
+	lua_remove (L, 1);
 	return 1;
 }
 
