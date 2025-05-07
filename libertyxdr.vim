@@ -8,7 +8,7 @@ syn region libertyxdrBlockComment start=+/[*]+ end=+[*]/+
 syn match libertyxdrComment "//.*"
 syn match libertyxdrIdentifier "\<[[:alpha:]][[:alnum:]_]*\>"
 syn match libertyxdrNumber "\<0\>\|\(-\|\<\)[1-9][[:digit:]]*\>"
-syn keyword libertyxdrKeyword const enum struct union switch case
+syn keyword libertyxdrKeyword const enum struct union switch case default
 syn keyword libertyxdrType bool u8 u16 u32 u64 i8 i16 i32 i64 string void
 
 let b:current_syntax = "libertyxdr"
