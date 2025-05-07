@@ -93,10 +93,12 @@ and always-present field, which must be a tag *enum*:
  case CAR:   void;
  case LORRY: i8 axles;
  case PLANE: i8 engines;
+ default:    void;
  };
 
-All possible enumeration values must be named, and there is no *case*
-fall-through.
+There is no *case* fall-through.
+Unless *default* is present, only the listed enumeration values are valid.
+Any *default* must currently be empty.
 
 Framing
 -------

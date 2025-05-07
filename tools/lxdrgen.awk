@@ -1,6 +1,6 @@
 # lxdrgen.awk: an XDR-derived code generator for network protocols.
 #
-# Copyright (c) 2022 - 2023, Přemysl Eric Janouch <p@janouch.name>
+# Copyright (c) 2022 - 2025, Přemysl Eric Janouch <p@janouch.name>
 # SPDX-License-Identifier: 0BSD
 #
 # Usage: env LC_ALL=C awk -f lxdrgen.awk -f lxdrgen-{c,go,mjs}.awk \
@@ -218,7 +218,7 @@ function defstruct(    name, d, cg) {
 }
 
 function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i,
-		unseen, exhaustive) {
+		unseen, defaulted, exhaustive) {
 	delete cg[0]
 	delete scg[0]
 	delete d[0]
@@ -249,9 +249,22 @@ function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i,
 			if (!unseen[tagvalue]--)
 				fatal("no such value or duplicate case: " tagtype "." tagvalue)
 			codegen_struct_tag(tag, scg)
+		} else if (accept("default")) {
+			if (tagvalue)
+				codegen_union_struct(name, tagvalue, cg, scg)
+
+			expect(accept(":"))
+			if (defaulted)
+				fatal("duplicate default")
+
+			tagvalue = ""
+			defaulted = 1
 		} else if (tagvalue) {
 			if (readfield(d))
 				codegen_struct_field(d, scg)
+		} else if (defaulted) {
+			if (readfield(d))
+				fatal("default must not contain fields")
 		} else {
 			fatal("union fields must fall under a case")
 		}
@@ -259,11 +272,17 @@ function defunion(    name, tag, tagtype, tagvalue, cg, scg, d, a, i,
 	if (tagvalue)
 		codegen_union_struct(name, tagvalue, cg, scg)
 
-	# Unseen cases are simply not recognized/allowed.
+	# Unseen cases are only recognized/allowed when default is present.
 	exhaustive = 1
 	for (i in unseen)
-		if (i && unseen[i])
-			exhaustive = 0
+		if (i && unseen[i]) {
+			if (defaulted) {
+				codegen_struct_tag(tag, scg)
+				codegen_union_struct(name, i, cg, scg)
+			} else {
+				exhaustive = 0
+			}
+		}
 
 	Types[name] = "union"
 	codegen_union(name, cg, exhaustive)

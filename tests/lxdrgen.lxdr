@@ -25,5 +25,7 @@ struct Struct {
 	union Onion switch (Enum tag) {
 	case NOTHING:
 		void;
+	default:
+		void;
 	} o;
 };
