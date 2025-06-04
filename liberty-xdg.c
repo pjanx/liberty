@@ -86,24 +86,30 @@ xdg_xsettings_update (struct xdg_xsettings *self, Display *dpy)
 	// TODO: We're supposed to lock the server.
 	// TODO: We're supposed to trap X errors.
 	char *selection = xstrdup_printf ("_XSETTINGS_S%d", DefaultScreen (dpy));
-	Window owner
-		= XGetSelectionOwner (dpy, XInternAtom (dpy, selection, True));
+	Atom selection_atom = XInternAtom (dpy, selection, True);
 	free (selection);
+	if (!selection_atom)
+		return;
+
+	Window owner = XGetSelectionOwner (dpy, selection_atom);
 	if (!owner)
+		return;
+
+	Atom xsettings_atom = XInternAtom (dpy, "_XSETTINGS_SETTINGS", True);
+	if (!xsettings_atom)
 		return;
 
 	Atom actual_type = None;
 	int actual_format = 0;
 	unsigned long nitems = 0, bytes_after = 0;
 	unsigned char *buffer = NULL;
-	Atom xsettings = XInternAtom (dpy, "_XSETTINGS_SETTINGS", True);
 	int status = XGetWindowProperty (dpy,
 		owner,
-		xsettings,
+		xsettings_atom,
 		0L,
 		LONG_MAX,
 		False,
-		xsettings,
+		xsettings_atom,
 		&actual_type,
 		&actual_format,
 		&nitems,
@@ -112,7 +118,7 @@ xdg_xsettings_update (struct xdg_xsettings *self, Display *dpy)
 	if (status != Success || !buffer)
 		return;
 
-	if (actual_type != xsettings
+	if (actual_type != xsettings_atom
 	 || actual_format != 8
 	 || nitems < 12)
 		goto fail;
