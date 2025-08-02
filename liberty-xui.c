@@ -1884,6 +1884,8 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	if (!(g_xui.dpy = XkbOpenDisplay
 		(NULL, &g_xui.xkb_base_event_code, NULL, NULL, NULL, NULL)))
 		exit_fatal ("cannot open display");
+	if (!XftInit (NULL))
+		print_warning ("Fontconfig initialization failed");
 	if (!XftDefaultHasRender (g_xui.dpy))
 		exit_fatal ("XRender is not supported");
 	if (!(g_xui.x11_im = XOpenIM (g_xui.dpy, NULL, NULL, NULL)))
@@ -1912,8 +1914,6 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	g_xui.x11_xsettings = xdg_xsettings_make ();
 	xdg_xsettings_update (&g_xui.x11_xsettings, g_xui.dpy);
 
-	if (!FcInit ())
-		print_warning ("Fontconfig initialization failed");
 	if (!(g_xui.xft_fonts = x11_font_open (0)))
 		exit_fatal ("cannot open a font");
 
