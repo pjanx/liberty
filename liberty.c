@@ -1209,7 +1209,10 @@ async_make (struct async_manager *manager)
 }
 
 /// Only allowed from the main thread once the job has been started but before
-/// the results have been dispatched
+/// the results have been dispatched.
+///
+/// Note that it may in practice lead to memory leakage, although that's
+/// an implementation issue: https://eissing.org/icing/posts/rip_pthread_cancel/
 static void
 async_cancel (struct async *self)
 {
