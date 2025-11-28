@@ -1269,14 +1269,21 @@ x11_render_label (struct widget *self)
 	XRenderColor solid = *x11_fg (self), colors[3] = { solid, solid, solid };
 	colors[2].alpha = 0;
 
-	double portion = MIN (1, 2.0 * font->list->font->height / space);
+	// Nvidia's XRender appears to not add (x, y) to (srcx, srcy),
+	// and works correctly if we pass self->x as srcx further on.
+	//
+	// Instead of special-casing nvidia_drv.so, let's have the gradient
+	// also extend to the left, in order to make text legible at all.
+	//
+	// We could also detect the behaviour experimentally in run-time.
+	double portion = MIN (1, 2. * font->list->font->height / (self->x + space));
 	XFixed stops[3] = { 0, XDoubleToFixed (1 - portion), XDoubleToFixed (1) };
-	XLinearGradient gradient = { {}, { XDoubleToFixed (space), 0 } };
+	XLinearGradient gradient = { {}, { XDoubleToFixed (self->x + space), 0 } };
 
 	// Note that this masking is a very expensive operation.
 	Picture source =
 		XRenderCreateLinearGradient (g_xui.dpy, &gradient, stops, colors, 3);
-	x11_font_render (font, PictOpOver, source, -self->x, 0, self->x, self->y,
+	x11_font_render (font, PictOpOver, source, 0, 0, self->x, self->y,
 		self->text);
 	XRenderFreePicture (g_xui.dpy, source);
 }
