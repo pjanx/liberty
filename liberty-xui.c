@@ -1,7 +1,7 @@
 /*
  * liberty-xui.c: the ultimate C unlibrary: hybrid terminal/X11 UI
  *
- * Copyright (c) 2016 - 2024, Přemysl Eric Janouch <p@janouch.name>
+ * Copyright (c) 2016 - 2026, Přemysl Eric Janouch <p@janouch.name>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted.
@@ -72,6 +72,11 @@ enum { XUI_KEYMOD_DOUBLE_CLICK = 1 << 15 };
 #define LIBERTY_XDG_WANT_ICONS
 #include "liberty-xdg.c"
 #endif  // LIBERTY_XUI_WANT_X11
+
+#ifdef LIBERTY_XUI_WANT_APPKIT
+#import <AppKit/AppKit.h>
+#import <CoreFoundation/CoreFoundation.h>
+#endif  // LIBERTY_XUI_WANT_APPKIT
 
 // The application needs to implement these.
 static void app_quit (void);
@@ -592,7 +597,7 @@ struct widget
 	chtype attrs;                       ///< Rendition, in Curses terms
 	unsigned extended_attrs;            ///< XUI-specific attributes
 
-	int id;                             ///< Post-layouting identification
+	int widget_id;                      ///< Post-layouting identification
 	int userdata;                       ///< Action ID/Tab index/...
 	char text[];                        ///< Any text label
 };
@@ -704,6 +709,23 @@ struct xui
 	XRenderColor *x_fg;                 ///< Foreground per attribute
 	XRenderColor *x_bg;                 ///< Background per attribute
 #endif  // LIBERTY_XUI_WANT_X11
+
+	// AppKit:
+
+#ifdef LIBERTY_XUI_WANT_APPKIT
+	NSWindow *appkit_window;            ///< Application window
+	NSView *appkit_view;                ///< Application view
+	id appkit_delegate;                 ///< Application delegate
+
+	struct poller_timer appkit_event;   ///< Poll for AppKit events
+
+	NSFont *appkit_font_regular;        ///< Regular proportional font
+	NSFont *appkit_font_monospace;      ///< Regular monospace font
+	NSColor *appkit_colors[256];        ///< Colour cube
+
+	NSColor **appkit_fg;                ///< Foreground per attribute (weak ref)
+	NSColor **appkit_bg;                ///< Background per attribute (weak ref)
+#endif  // LIBERTY_XUI_WANT_APPKIT
 }
 g_xui;
 
@@ -1523,11 +1545,11 @@ on_x11_keypress (XEvent *e)
 	}
 
 	bool result = true;
+	key.type = TERMO_TYPE_KEY;
+	key.modifiers &= ~TERMO_KEYMOD_SHIFT;
+
 	if (len)
 	{
-		key.type = TERMO_TYPE_KEY;
-		key.modifiers &= ~TERMO_KEYMOD_SHIFT;
-
 		int32_t cp = 0;
 		struct utf8_iter iter = { .s = buf, .len = len };
 		size_t cp_len = 0;
@@ -2019,6 +2041,820 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 
 #endif  // LIBERTY_XUI_WANT_X11
 
+// --- AppKit ------------------------------------------------------------------
+
+#ifdef LIBERTY_XUI_WANT_APPKIT
+
+static const int appkit_default_fg = 16;
+static const int appkit_default_bg = 231;
+
+static NSString *
+appkit_string (const char *text)
+{
+	NSString *string = [NSString stringWithUTF8String:text];
+	if (!string)
+		string = @"?";
+	return string;
+}
+
+static int
+appkit_font_hadvance (NSFont *font, const char *text)
+{
+	NSDictionary *attrs
+		= [NSDictionary dictionaryWithObject:font forKey:NSFontAttributeName];
+	return ceil ([appkit_string (text) sizeWithAttributes:attrs].width);
+}
+
+static void
+appkit_font_draw (NSFont *font, NSColor *color, int x, int y,
+	const char *text, int max_width)
+{
+	NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
+	[style setLineBreakMode:NSLineBreakByTruncatingTail];
+
+	NSDictionary *attrs = [NSDictionary dictionaryWithObjectsAndKeys:
+		font, NSFontAttributeName,
+		color, NSForegroundColorAttributeName,
+		style, NSParagraphStyleAttributeName,
+		nil];
+	[style release];
+
+	NSRect rect = NSMakeRect (x, y, max_width, g_xui.vunit);
+	[appkit_string (text) drawInRect:rect withAttributes:attrs];
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static NSFont *
+appkit_widget_font (struct widget *self)
+{
+	NSFont *base = (self->extended_attrs & XUI_ATTR_MONOSPACE)
+		? g_xui.appkit_font_monospace
+		: g_xui.appkit_font_regular;
+
+	NSFontTraitMask traits = 0;
+	if (self->attrs & A_BOLD)
+		traits |= NSBoldFontMask;
+#ifdef A_ITALIC
+	if (self->attrs & A_ITALIC)
+		traits |= NSItalicFontMask;
+#endif  // A_ITALIC
+
+	NSFont *font = [[NSFontManager sharedFontManager]
+		convertFont:base toHaveTrait:traits];
+	return font ? font : base;
+}
+
+static NSColor *
+appkit_fg_attrs (chtype attrs)
+{
+	int pair = PAIR_NUMBER (attrs);
+	if (!pair--)
+		return g_xui.appkit_colors[appkit_default_fg];
+	return ((attrs & A_REVERSE) ? g_xui.appkit_bg : g_xui.appkit_fg)[pair];
+}
+
+static NSColor *
+appkit_fg (struct widget *self)
+{
+	return appkit_fg_attrs (self->attrs);
+}
+
+static NSColor *
+appkit_bg_attrs (chtype attrs)
+{
+	int pair = PAIR_NUMBER (attrs);
+	if (!pair--)
+		return g_xui.appkit_colors[appkit_default_bg];
+	return ((attrs & A_REVERSE) ? g_xui.appkit_fg : g_xui.appkit_bg)[pair];
+}
+
+static NSColor *
+appkit_bg (struct widget *self)
+{
+	return appkit_bg_attrs (self->attrs);
+}
+
+static void
+appkit_render_padding (struct widget *self)
+{
+	if (PAIR_NUMBER (self->attrs))
+	{
+		[appkit_bg (self) setFill];
+		NSRectFill (NSMakeRect (self->x, self->y, self->width, self->height));
+	}
+	if (self->attrs & A_UNDERLINE)
+	{
+		[appkit_fg (self) setFill];
+		NSRectFill (NSMakeRect
+			(self->x, self->y + self->height - 1, self->width, 1));
+	}
+}
+
+static struct widget *
+appkit_make_padding (chtype attrs, float width, float height)
+{
+	struct widget *w = xcalloc (1, sizeof *w + 2);
+	w->text[0] = ' ';
+	w->on_render = appkit_render_padding;
+	w->attrs = attrs;
+	w->width = g_xui.vunit * width;
+	w->height = g_xui.vunit * height;
+	return w;
+}
+
+static void
+appkit_render_label (struct widget *self)
+{
+	appkit_render_padding (self);
+
+	int space = MIN (self->width, g_xui.width - self->x);
+	if (space <= 0)
+		return;
+
+	NSFont *font = appkit_widget_font (self);
+	int y = self->y + (self->height - g_xui.vunit) / 2;
+	appkit_font_draw (font, appkit_fg (self), self->x, y, self->text, space);
+}
+
+static struct widget *
+appkit_make_label (chtype attrs, unsigned extended, const char *label)
+{
+	size_t label_len = strlen (label) + 1;
+
+	struct widget *w = xcalloc (1, sizeof *w + label_len);
+	w->on_render = appkit_render_label;
+	w->attrs = attrs;
+	w->extended_attrs = extended;
+	memcpy (w->text, label, label_len);
+
+	NSFont *font = appkit_widget_font (w);
+	w->width = appkit_font_hadvance (font, w->text);
+	w->height = g_xui.vunit;
+	return w;
+}
+
+static void
+appkit_render_widget (struct widget *w, NSRect clip)
+{
+	if (w->width < 0 || w->height < 0)
+		return;
+
+	NSRect rect = NSMakeRect (w->x, w->y, w->width, w->height);
+	NSRect subclip = NSIntersectionRect (rect, clip);
+	if (NSIsEmptyRect (subclip))
+		return;
+
+	[NSGraphicsContext saveGraphicsState];
+	NSRectClip (subclip);
+	if (w->on_render)
+		w->on_render (w);
+	[NSGraphicsContext restoreGraphicsState];
+
+	LIST_FOR_EACH (struct widget, child, w->children)
+		appkit_render_widget (child, subclip);
+}
+
+static void
+appkit_render (void)
+{
+	@autoreleasepool
+	{
+		[g_xui.appkit_view setNeedsDisplay:YES];
+		[g_xui.appkit_view displayIfNeeded];
+		[NSApp updateWindows];
+	}
+}
+
+static void
+appkit_flip (void)
+{
+	// AppKit does its own double-buffering, flipping is done in render(),
+	// or more specifically in the drawRect: method.
+}
+
+static void
+appkit_destroy (void)
+{
+	[g_xui.appkit_window close];
+	g_xui.appkit_event.dispatcher (NULL);
+	poller_timer_reset (&g_xui.appkit_event);
+
+	[g_xui.appkit_window setDelegate:nil];
+	[g_xui.appkit_delegate release];
+	g_xui.appkit_delegate = nil;
+
+	[g_xui.appkit_view release];
+	g_xui.appkit_view = nil;
+
+	[g_xui.appkit_window release];
+	g_xui.appkit_window = nil;
+
+	[g_xui.appkit_font_regular release];
+	g_xui.appkit_font_regular = nil;
+	[g_xui.appkit_font_monospace release];
+	g_xui.appkit_font_monospace = nil;
+
+	for (size_t i = 0; i < N_ELEMENTS (g_xui.appkit_colors); i++)
+		[g_xui.appkit_colors[i] release];
+	memset (g_xui.appkit_colors, 0, sizeof g_xui.appkit_colors);
+
+	free (g_xui.appkit_fg);
+	free (g_xui.appkit_bg);
+	g_xui.appkit_fg = NULL;
+	g_xui.appkit_bg = NULL;
+}
+
+static struct ui appkit_ui =
+{
+	.padding     = appkit_make_padding,
+	.label       = appkit_make_label,
+
+	.render      = appkit_render,
+	.flip        = appkit_flip,
+	.destroy     = appkit_destroy,
+};
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static termo_sym_t
+appkit_convert_special (unichar c)
+{
+	// Leaving out TERMO_TYPE_FUNCTION, TERMO_SYM_DEL (N/A),
+	// and TERMO_SYM_SPACE (governed by TERMO_FLAG_SPACESYMBOL, not in use).
+	switch (c)
+	{
+	case NSBackspaceCharacter:       return TERMO_SYM_BACKSPACE;
+	case NSDeleteCharacter:          return TERMO_SYM_BACKSPACE;
+	case NSTabCharacter:             return TERMO_SYM_TAB;
+	case NSBackTabCharacter:         return TERMO_SYM_TAB;
+	case NSCarriageReturnCharacter:  return TERMO_SYM_ENTER;
+	case NSEnterCharacter:           return TERMO_SYM_ENTER;
+	case 0x1b:                       return TERMO_SYM_ESCAPE;
+
+	case NSUpArrowFunctionKey:       return TERMO_SYM_UP;
+	case NSDownArrowFunctionKey:     return TERMO_SYM_DOWN;
+	case NSLeftArrowFunctionKey:     return TERMO_SYM_LEFT;
+	case NSRightArrowFunctionKey:    return TERMO_SYM_RIGHT;
+	case NSBeginFunctionKey:         return TERMO_SYM_BEGIN;
+	case NSFindFunctionKey:          return TERMO_SYM_FIND;
+	case NSInsertFunctionKey:        return TERMO_SYM_INSERT;
+	case NSDeleteFunctionKey:        return TERMO_SYM_DELETE;
+	case NSSelectFunctionKey:        return TERMO_SYM_SELECT;
+	case NSPageUpFunctionKey:        return TERMO_SYM_PAGEUP;
+	case NSPageDownFunctionKey:      return TERMO_SYM_PAGEDOWN;
+	case NSHomeFunctionKey:          return TERMO_SYM_HOME;
+	case NSEndFunctionKey:           return TERMO_SYM_END;
+
+	// TERMO_SYM_CANCEL
+	// TERMO_SYM_CLEAR
+	// TERMO_SYM_CLOSE
+	// TERMO_SYM_COMMAND
+	// TERMO_SYM_COPY
+	// TERMO_SYM_EXIT
+	case NSHelpFunctionKey:          return TERMO_SYM_HELP;
+	// TERMO_SYM_MARK
+	// TERMO_SYM_MESSAGE
+	// TERMO_SYM_MOVE
+	// TERMO_SYM_OPEN
+	// TERMO_SYM_OPTIONS
+	case NSPrintFunctionKey:         return TERMO_SYM_PRINT;
+	case NSRedoFunctionKey:          return TERMO_SYM_REDO;
+	// TERMO_SYM_REFERENCE
+	// TERMO_SYM_REFRESH
+	// TERMO_SYM_REPLACE
+	// TERMO_SYM_RESTART
+	// TERMO_SYM_RESUME
+	// TERMO_SYM_SAVE
+	// TERMO_SYM_SUSPEND
+	case NSUndoFunctionKey:          return TERMO_SYM_UNDO;
+
+	// TERMO_SYM_KP*
+	}
+	return TERMO_SYM_UNKNOWN;
+}
+
+static int
+appkit_modifiers (NSEventModifierFlags flags)
+{
+	int modifiers = 0;
+	if (flags & NSEventModifierFlagShift)   modifiers |= TERMO_KEYMOD_SHIFT;
+	if (flags & NSEventModifierFlagControl) modifiers |= TERMO_KEYMOD_CTRL;
+	if (flags & NSEventModifierFlagOption)  modifiers |= TERMO_KEYMOD_ALT;
+	return modifiers;
+}
+
+static bool
+on_appkit_key_down (NSEvent *event)
+{
+	if ([event modifierFlags] & NSEventModifierFlagCommand)
+		return true;
+
+	termo_key_t key = {};
+	key.modifiers = appkit_modifiers ([event modifierFlags]);
+
+	NSString *ignoring_modifiers = [event charactersIgnoringModifiers];
+	if ([ignoring_modifiers length] == 1)
+	{
+		unichar c = [ignoring_modifiers characterAtIndex:0];
+		if (c >= NSF1FunctionKey && c <= NSF35FunctionKey)
+		{
+			key.type = TERMO_TYPE_FUNCTION;
+			key.code.number = 1 + c - NSF1FunctionKey;
+			return xui_process_termo_event (&key);
+		}
+		if ((key.code.sym = appkit_convert_special (c)) != TERMO_SYM_UNKNOWN)
+		{
+			key.type = TERMO_TYPE_KEYSYM;
+			return xui_process_termo_event (&key);
+		}
+	}
+
+	// Let's make the right Option key act as AltGr, if possible.
+	CGEventRef e = [event CGEvent];
+	if (e && (CGEventGetFlags (e) & NX_DEVICERALTKEYMASK))
+		key.modifiers &= ~TERMO_KEYMOD_ALT;
+
+	bool result = true;
+	key.type = TERMO_TYPE_KEY;
+	key.modifiers &= ~TERMO_KEYMOD_SHIFT;
+
+	NSData *utf8 = [[event characters] dataUsingEncoding:NSUTF8StringEncoding];
+	if (utf8 && [utf8 length] > 0)
+	{
+		int32_t cp = 0;
+		struct utf8_iter iter = { .s = [utf8 bytes], .len = [utf8 length] };
+		const char *p = iter.s;
+
+		size_t cp_len = 0;
+		while ((cp = utf8_iter_next (&iter, &cp_len)) >= 0)
+		{
+			termo_key_t k = key;
+			memcpy (k.multibyte, p, MIN (cp_len, sizeof k.multibyte - 1));
+			p += cp_len;
+
+			// This is all unfortunate, but probably in the right place.
+			if (!cp)
+			{
+				k.code.codepoint = ' ';
+				if ([event modifierFlags] & NSEventModifierFlagShift)
+					k.modifiers |= TERMO_KEYMOD_SHIFT;
+			}
+			else if (cp >= 32)
+				k.code.codepoint = cp;
+			else if ([event modifierFlags] & NSEventModifierFlagShift)
+				k.code.codepoint = cp + 64;
+			else
+				k.code.codepoint = cp + 96;
+			if (!xui_process_termo_event (&k))
+				result = false;
+		}
+	}
+	return result;
+}
+
+static char *
+appkit_find_text (struct widget *list, int x, int y)
+{
+	struct widget *target = NULL;
+	LIST_FOR_EACH (struct widget, w, list)
+		if (x >= w->x && x < w->x + w->width
+		 && y >= w->y && y < w->y + w->height)
+			target = w;
+	if (!target)
+		return NULL;
+
+	char *result = appkit_find_text (target->children, x, y);
+	if (result)
+		return result;
+	return xstrdup (target->text);
+}
+
+static void
+appkit_update_dimensions (void)
+{
+	NSRect bounds = [g_xui.appkit_view bounds];
+	g_xui.width = bounds.size.width;
+	g_xui.height = bounds.size.height;
+}
+
+static bool
+appkit_event_position (NSEvent *event, int *x, int *y)
+{
+	NSPoint p = [g_xui.appkit_view
+		convertPoint:[event locationInWindow] fromView:nil];
+	*x = p.x;
+	*y = p.y;
+	return true;
+}
+
+static int
+appkit_mouse_button (NSEvent *event)
+{
+	NSUInteger button = [event buttonNumber];
+	switch (button)
+	{
+	case 0:
+		return 1;
+	case 1:
+		return 3;
+	case 2:
+		return 2;
+	default:
+		// Skip all scroll wheel directions, so that we match X11.
+		return button + 1 + 4;
+	}
+}
+
+static bool
+appkit_process_press (int x, int y, int button, int modifiers)
+{
+	if (button != 3)
+		goto out;
+
+	char *text = appkit_find_text (g_xui.widgets, x, y);
+	if (!text || !*(cstr_strip_in_place (text, " \t")))
+	{
+		free (text);
+		goto out;
+	}
+
+	NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+	[pasteboard clearContents];
+	[pasteboard setString:appkit_string (text) forType:NSPasteboardTypeString];
+	app_on_clipboard_copy (text);
+	free (text);
+	return true;
+
+out:
+	return app_process_mouse (TERMO_MOUSE_PRESS, x, y, button, modifiers);
+}
+
+static bool
+on_appkit_mouse_event (NSEvent *event, termo_mouse_event_t type, int button)
+{
+	int x = 0, y = 0;
+	if (!appkit_event_position (event, &x, &y))
+		return false;
+
+	int modifiers = appkit_modifiers ([event modifierFlags]);
+	if (type == TERMO_MOUSE_PRESS && [event clickCount] > 1)
+		modifiers |= XUI_KEYMOD_DOUBLE_CLICK;
+
+	if (type == TERMO_MOUSE_PRESS)
+		return appkit_process_press (x, y, button, modifiers);
+
+	return app_process_mouse (type, x, y, button, modifiers);
+}
+
+static bool
+on_appkit_scroll_event (NSEvent *event)
+{
+	int x = 0, y = 0;
+	if (!appkit_event_position (event, &x, &y))
+		return false;
+
+	double delta_y = [event scrollingDeltaY];
+	if (!delta_y)
+		return true;
+
+	int modifiers = appkit_modifiers ([event modifierFlags]);
+	int button = delta_y > 0 ? 4 : 5;
+	int repeats = MAX (1, (int) round (fabs (delta_y)));
+	bool result = true;
+	while (result && repeats-- > 0)
+	{
+		result &= app_process_mouse (TERMO_MOUSE_PRESS,
+			x, y, button, modifiers);
+
+		// XXX: Terminals do not send it, but X11 does.  We should either
+		// suppress the releases, or synthesize them for terminals as well.
+		result &= app_process_mouse (TERMO_MOUSE_RELEASE,
+			x, y, button, modifiers);
+	}
+	return result;
+}
+
+static void
+appkit_send_focus_event (bool focused)
+{
+	termo_key_t key = { .type = TERMO_TYPE_FOCUS };
+	key.code.focused = focused;
+	xui_process_termo_event (&key);
+}
+
+@interface XUIAppKitView : NSView
+@end
+
+@implementation XUIAppKitView
+
+- (BOOL) isFlipped { return YES; }
+- (BOOL) acceptsFirstResponder { return YES; }
+
+- (void) drawRect:(NSRect)dirty_rect
+{
+	[g_xui.appkit_colors[appkit_default_bg] setFill];
+	NSRectFill (dirty_rect);
+
+	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
+		appkit_render_widget (w, dirty_rect);
+}
+
+- (void) keyDown:(NSEvent *)event
+{
+	if (!on_appkit_key_down (event))
+		NSBeep ();
+}
+
+- (void) mouseDown:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_PRESS, 1))
+		NSBeep ();
+}
+
+- (void) mouseUp:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_RELEASE, 1))
+		NSBeep ();
+}
+
+- (void) rightMouseDown:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_PRESS, 3))
+		NSBeep ();
+}
+
+- (void) rightMouseUp:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_RELEASE, 3))
+		NSBeep ();
+}
+
+- (void) otherMouseDown:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event,
+		TERMO_MOUSE_PRESS, appkit_mouse_button (event)))
+		NSBeep ();
+}
+
+- (void) otherMouseUp:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event,
+		TERMO_MOUSE_RELEASE, appkit_mouse_button (event)))
+		NSBeep ();
+}
+
+- (void) mouseDragged:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_DRAG, 1))
+		NSBeep ();
+}
+
+- (void) rightMouseDragged:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event, TERMO_MOUSE_DRAG, 3))
+		NSBeep ();
+}
+
+- (void) otherMouseDragged:(NSEvent *)event
+{
+	if (!on_appkit_mouse_event (event,
+		TERMO_MOUSE_DRAG, appkit_mouse_button (event)))
+		NSBeep ();
+}
+
+- (void) scrollWheel:(NSEvent *)event
+{
+	if (!on_appkit_scroll_event (event))
+		NSBeep ();
+}
+
+@end
+
+@interface XUIAppKitDelegate : NSObject <NSWindowDelegate>
+@end
+
+@implementation XUIAppKitDelegate
+
+- (void) windowWillClose:(NSNotification *)notification
+{
+	(void) notification;
+	app_quit ();
+}
+
+- (void) windowDidResize:(NSNotification *)notification
+{
+	(void) notification;
+	appkit_update_dimensions ();
+
+	// AppKit seems to run an event subloop, so relayout immediately.
+	g_xui.refresh_event.dispatcher (NULL);
+	poller_idle_reset (&g_xui.refresh_event);
+}
+
+- (void) windowDidBecomeKey:(NSNotification *)notification
+{
+	(void) notification;
+	appkit_send_focus_event (true);
+}
+
+- (void) windowDidResignKey:(NSNotification *)notification
+{
+	(void) notification;
+	appkit_send_focus_event (false);
+}
+
+@end
+
+static NSEvent *
+appkit_next_event (NSDate *limit)
+{
+	// Probably not needing NSEventTrackingRunLoopMode
+	// or NSModalPanelRunLoopMode.
+	return [NSApp nextEventMatchingMask:NSEventMaskAny
+		untilDate:limit inMode:NSDefaultRunLoopMode dequeue:true];
+}
+
+static void
+on_appkit_ready (void *user_data)
+{
+	(void) user_data;
+
+	// AppKit likes to own the event loop; we give up and poll.
+	poller_timer_set (&g_xui.appkit_event, 1000 / 60 /* FPS */);
+
+	@autoreleasepool
+	{
+		NSDate *limit = [NSDate distantPast];
+		NSEvent *event = nil;
+		while ((event = appkit_next_event (limit)))
+		{
+			[NSApp sendEvent:event];
+			[NSApp updateWindows];
+		}
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+static NSColor *
+appkit_convert_color (int color)
+{
+	hard_assert (color >= 0 && color <= 255);
+
+	static const uint16_t base[16] =
+	{
+		0x000, 0x800, 0x080, 0x880, 0x008, 0x808, 0x088, 0xccc,
+		0x888, 0xf00, 0x0f0, 0xff0, 0x00f, 0xf0f, 0x0ff, 0xfff,
+	};
+
+	CGFloat red = 1, green = 1, blue = 1, alpha = 1;
+	if (color < 16)
+	{
+		red   =        (base[color] >> 8)  / 15.0;
+		green = (0xf & (base[color] >> 4)) / 15.0;
+		blue  = (0xf & (base[color]))      / 15.0;
+	}
+	else if (color >= 232)
+		red = green = blue = (8 + (color - 232) * 10) / 255.0;
+	else
+	{
+		color -= 16;
+
+		int r =  color / 36;
+		int g = (color / 6) % 6;
+		int b = (color % 6);
+		red   = !!r * (55 + 40 * r) / 255.0;
+		green = !!g * (55 + 40 * g) / 255.0;
+		blue  = !!b * (55 + 40 * b) / 255.0;
+	}
+	return [NSColor colorWithDeviceRed:red green:green blue:blue alpha:alpha];
+}
+
+static void
+appkit_init_attributes (struct attrs *attrs, size_t attrs_len)
+{
+	for (size_t i = 0; i < N_ELEMENTS (g_xui.appkit_colors); i++)
+		g_xui.appkit_colors[i] = [appkit_convert_color (i) retain];
+
+	g_xui.appkit_fg = xcalloc (attrs_len, sizeof *g_xui.appkit_fg);
+	g_xui.appkit_bg = xcalloc (attrs_len, sizeof *g_xui.appkit_bg);
+	for (size_t a = 0; a < attrs_len; a++)
+	{
+		g_xui.appkit_fg[a] = g_xui.appkit_colors[appkit_default_fg];
+		g_xui.appkit_bg[a] = g_xui.appkit_colors[appkit_default_bg];
+		if (attrs[a].fg >= 256 || attrs[a].fg < -1
+		 || attrs[a].bg >= 256 || attrs[a].bg < -1)
+			continue;
+
+		if (attrs[a].fg != -1)
+			g_xui.appkit_fg[a] = g_xui.appkit_colors[attrs[a].fg];
+		if (attrs[a].bg != -1)
+			g_xui.appkit_bg[a] = g_xui.appkit_colors[attrs[a].bg];
+
+		attrs[a].attrs |= COLOR_PAIR (a + 1);
+	}
+}
+
+static void
+appkit_init_menu (void)
+{
+	NSMenu *app_menu = [[NSMenu new] autorelease];
+
+	NSMenuItem *services_item = [app_menu
+		addItemWithTitle:@"Services"
+		action:nil
+		keyEquivalent:@""];
+	NSMenu *services_menu = [[NSMenu new] autorelease];
+	[services_item setSubmenu:services_menu];
+	[NSApp setServicesMenu:services_menu];
+
+	[app_menu addItem:[NSMenuItem separatorItem]];
+	[app_menu addItemWithTitle:@"Hide " PROGRAM_NAME
+		action:@selector (hide:)
+		keyEquivalent:@"h"];
+	[app_menu addItem:[NSMenuItem separatorItem]];
+	[app_menu addItemWithTitle:@"Quit " PROGRAM_NAME
+		action:@selector (terminate:)
+		keyEquivalent:@"q"];
+
+	NSMenuItem *app_menu_item = [[NSMenuItem new] autorelease];
+	[app_menu_item setSubmenu:app_menu];
+	NSMenu *menubar = [[NSMenu new] autorelease];
+	[menubar addItem:app_menu_item];
+	[NSApp setMainMenu:menubar];
+}
+
+static void
+appkit_init (struct poller *poller, struct attrs *attrs, size_t attrs_len)
+{
+	(void) [NSApplication sharedApplication];
+	// Apparently this won't succeed when run from within a bundle.
+	(void) [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+	appkit_init_menu ();
+	[NSApp finishLaunching];
+
+	NSFont *system =
+		[NSFont systemFontOfSize:[NSFont systemFontSize]];
+	NSFont *mono =
+		[NSFont userFixedPitchFontOfSize:[NSFont systemFontSize]];
+	if (!mono)
+		mono = system;
+	g_xui.appkit_font_regular = [system retain];
+	g_xui.appkit_font_monospace = [mono retain];
+	if (!g_xui.appkit_font_regular || !g_xui.appkit_font_monospace)
+		[NSException raise:@"failed" format:@"failed to load fonts"];
+
+	g_xui.vunit = ceil ([system ascender] - [system descender]
+		+ [system leading]);
+	g_xui.vunit = MAX (1, g_xui.vunit);
+	g_xui.hunit = MAX (1, g_xui.vunit / 2);
+	g_xui.height = 24 * g_xui.vunit;
+	g_xui.width = g_xui.height * 4 / 3;
+
+	NSRect frame = NSMakeRect (0, 0, g_xui.width, g_xui.height);
+	NSWindowStyleMask style = NSWindowStyleMaskTitled
+		| NSWindowStyleMaskClosable
+		| NSWindowStyleMaskMiniaturizable
+		| NSWindowStyleMaskResizable;
+	g_xui.appkit_window = [[NSWindow alloc]
+		initWithContentRect:frame
+		styleMask:style
+		backing:NSBackingStoreBuffered
+		defer:NO];
+	if (!g_xui.appkit_window)
+		[NSException raise:@"failed" format:@"failed to create window"];
+	g_xui.appkit_window.releasedWhenClosed = false;
+	[g_xui.appkit_window center];
+
+	g_xui.appkit_view = [[XUIAppKitView alloc] initWithFrame:frame];
+	if (!g_xui.appkit_view)
+		[NSException raise:@"failed" format:@"failed to create view"];
+	[g_xui.appkit_window setContentView:g_xui.appkit_view];
+
+	g_xui.appkit_delegate = [XUIAppKitDelegate new];
+	if (!g_xui.appkit_delegate)
+		[NSException raise:@"failed" format:@"failed to create delegate"];
+	[g_xui.appkit_window setDelegate:g_xui.appkit_delegate];
+
+	[g_xui.appkit_window setAcceptsMouseMovedEvents:YES];
+	[g_xui.appkit_window setTitle:appkit_string (PROGRAM_NAME)];
+	[g_xui.appkit_window makeFirstResponder:g_xui.appkit_view];
+	[g_xui.appkit_window makeKeyAndOrderFront:nil];
+	[NSApp activateIgnoringOtherApps:YES];
+
+	appkit_update_dimensions ();
+	appkit_init_attributes (attrs, attrs_len);
+
+	g_xui.appkit_event = poller_timer_make (poller);
+	g_xui.appkit_event.dispatcher = on_appkit_ready;
+	poller_timer_set (&g_xui.appkit_event, 0);
+
+	g_xui.ui = &appkit_ui;
+}
+
+#endif  // LIBERTY_XUI_WANT_APPKIT
+
 // --- Containers --------------------------------------------------------------
 
 static void
@@ -2207,7 +3043,9 @@ static void
 xui_start (struct poller *poller,
 	bool force_x11, struct attrs *attrs, size_t attrs_len)
 {
+#if !defined LIBERTY_XUI_WANT_X11 && !defined LIBERTY_XUI_WANT_APPKIT
 	(void) force_x11;
+#endif  // !LIBERTY_XUI_WANT_X11 && !LIBERTY_XUI_WANT_APPKIT
 
 	g_xui.refresh_event = poller_idle_make (poller);
 	g_xui.refresh_event.dispatcher = xui_on_refresh;
@@ -2221,11 +3059,33 @@ xui_start (struct poller *poller,
 	g_xui.tk_timer.dispatcher = tui_on_key_timer;
 
 #ifdef LIBERTY_XUI_WANT_X11
-	if (force_x11 || (!isatty (STDIN_FILENO) && getenv ("DISPLAY")))
+	if (getenv ("DISPLAY")
+	 && (force_x11 || !isatty (STDIN_FILENO)))
+	{
 		x11_init (poller, attrs, attrs_len);
-	else
+		return;
+	}
 #endif  // LIBERTY_XUI_WANT_X11
-		tui_init (poller, attrs, attrs_len);
+
+#ifdef LIBERTY_XUI_WANT_APPKIT
+	if (force_x11 || !isatty (STDIN_FILENO))
+	{
+		@autoreleasepool
+		{
+			@try
+			{
+				appkit_init (poller, attrs, attrs_len);
+			}
+			@catch (NSException *e)
+			{
+				exit_fatal ("AppKit setup failed: %s", [[e reason] UTF8String]);
+			}
+		}
+		return;
+	}
+#endif  // LIBERTY_XUI_WANT_APPKIT
+
+	tui_init (poller, attrs, attrs_len);
 }
 
 static void
