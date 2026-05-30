@@ -3099,6 +3099,7 @@ xui_stop (void)
 	g_xui.ui->destroy ();
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
 		widget_destroy (w);
+	g_xui.widgets = NULL;
 
 	termo_destroy (g_xui.tk);
 }
