@@ -139,9 +139,9 @@ function format(line,    v) {
 	while (line) {
 		if (match(line, /^[+][+][+][^+]+[+][+][+]/)) {
 			v = v substr(line, RSTART + 3, RLENGTH - 6)
-		} else if (match(line, /^__[^_]+__/)) {
+		} else if (match(line, /^__([^_]+.)*[^_]+__/)) {
 			v = v "\\fI" substr(line, RSTART + 2, RLENGTH - 4) "\\fP"
-		} else if (match(line, /^[*][*][^*]+[*][*]/)) {
+		} else if (match(line, /^[*][*]([^*]+.)*[^*]+[*][*]/)) {
 			v = v "\\fB" substr(line, RSTART + 2, RLENGTH - 4) "\\fP"
 		} else if (match(line, /^_[^_]+_/) &&
 			substr(line, RSTART + RLENGTH) !~ /^[[:alnum:]]/) {
