@@ -50,7 +50,7 @@ endif ()
 foreach (name ${tests})
 	add_executable (test-${name} tests/${name}.c ${common_sources})
 	add_threads (test-${name})
-	target_link_libraries (test-${name} ${common_libraries})
+	target_link_libraries (test-${name} PRIVATE ${common_libraries})
 	add_test (NAME test-${name} COMMAND test-${name})
 endforeach ()
 
@@ -97,7 +97,7 @@ add_custom_target (test-lxdrgen-outputs ALL DEPENDS ${lxdrgen_outputs})
 set_source_files_properties (${lxdrgen_base}.c
 	PROPERTIES HEADER_FILE_ONLY TRUE)
 add_executable (test-lxdrgen-c tests/lxdrgen.c ${lxdrgen_base}.c)
-target_include_directories (test-lxdrgen-c PUBLIC ${PROJECT_BINARY_DIR})
+target_include_directories (test-lxdrgen-c PRIVATE ${PROJECT_BINARY_DIR})
 add_test (NAME test-lxdrgen-c COMMAND test-lxdrgen-c)
 
 set_source_files_properties (${lxdrgen_base}.cpp
@@ -109,8 +109,8 @@ else ()
 	add_executable (test-lxdrgen-cpp tests/lxdrgen.cpp
 		${lxdrgen_base}.cpp tools/lxdrgen-cpp-posix.cpp)
 endif ()
-target_link_libraries (test-lxdrgen-cpp ${common_libraries})
-target_include_directories (test-lxdrgen-cpp PUBLIC ${PROJECT_BINARY_DIR})
+target_link_libraries (test-lxdrgen-cpp PRIVATE ${common_libraries})
+target_include_directories (test-lxdrgen-cpp PRIVATE ${PROJECT_BINARY_DIR})
 add_test (NAME test-lxdrgen-cpp COMMAND test-lxdrgen-cpp)
 
 find_program (GO_EXECUTABLE go)
