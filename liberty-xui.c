@@ -1352,9 +1352,17 @@ x11_render_widget (struct widget *w, const XRectangle *clip)
 	// Children may set their own clips, so reset before each sibling.
 	// We need to go through Xft, or XftTextRenderUtf8() might skip glyphs.
 	if (clip)
+	{
 		XftDrawSetClipRectangles (g_xui.xft_draw, 0, 0, clip, 1);
+		XRenderSetPictureClipRectangles (g_xui.dpy,
+			g_xui.x11_pixmap_picture, 0, 0, clip, 1);
+	}
 	else
+	{
 		XftDrawSetClip (g_xui.xft_draw, None);
+		XRenderChangePicture (g_xui.dpy, g_xui.x11_pixmap_picture, CPClipMask,
+			&(XRenderPictureAttributes) { .clip_mask = None });
+	}
 
 	if (w->on_render)
 		w->on_render (w);
