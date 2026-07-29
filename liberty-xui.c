@@ -1035,11 +1035,9 @@ x11_font_open (unsigned style)
 		? FcNameParse ((const FcChar8 *) g_xui.x11_fontname_monospace)
 		: FcNameParse ((const FcChar8 *) g_xui.x11_fontname);
 	if (style & X11_FONT_BOLD)
-		FcPatternAdd (pattern, FC_STYLE, (FcValue) {
-			.type = FcTypeString, .u.s = (FcChar8 *) "Bold" }, FcFalse);
+		FcPatternAddInteger (pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
 	if (style & X11_FONT_ITALIC)
-		FcPatternAdd (pattern, FC_STYLE, (FcValue) {
-			.type = FcTypeString, .u.s = (FcChar8 *) "Italic" }, FcFalse);
+		FcPatternAddInteger (pattern, FC_SLANT, FC_SLANT_ITALIC);
 
 	FcPattern *substituted = FcPatternDuplicate (pattern);
 	FcConfigSubstitute (NULL, substituted, FcMatchPattern);
