@@ -628,6 +628,7 @@ struct ui
 	struct widget *(*label)
 		(chtype attrs, unsigned extended, const char *label);
 
+	void (*beep) (void);
 	void (*render) (void);
 	void (*flip) (void);
 	void (*winch) (void);
@@ -821,6 +822,12 @@ tui_render_widgets (struct widget *head)
 }
 
 static void
+tui_beep (void)
+{
+	beep ();
+}
+
+static void
 tui_render (void)
 {
 	erase ();
@@ -870,6 +877,7 @@ static struct ui tui_ui =
 	.padding     = tui_make_padding,
 	.label       = tui_make_label,
 
+	.beep        = tui_beep,
 	.render      = tui_render,
 	.flip        = tui_flip,
 	.winch       = tui_winch,
@@ -905,10 +913,10 @@ tui_on_tty_event (termo_key_t *event, int64_t event_ts)
 			last_button = button;
 
 		if (!app_process_mouse (type, x, y, button, modifiers))
-			beep ();
+			tui_beep ();
 	}
 	else if (!xui_process_termo_event (event))
-		beep ();
+		tui_beep ();
 
 	last_event = *event;
 	last_event_ts = event_ts;
@@ -944,7 +952,7 @@ tui_on_key_timer (void *user_data)
 	termo_key_t event;
 	if (termo_getkey_force (g_xui.tk, &event) == TERMO_RES_KEY)
 		if (!xui_process_termo_event (&event))
-			beep ();
+			tui_beep ();
 }
 
 static void
@@ -1375,6 +1383,13 @@ x11_render_widget (struct widget *w, const XRectangle *clip)
 }
 
 static void
+x11_beep (void)
+{
+	XkbBell (g_xui.dpy, g_xui.x11_window, 0, None);
+	XFlush (g_xui.dpy);
+}
+
+static void
 x11_render (void)
 {
 	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
@@ -1432,6 +1447,7 @@ static struct ui x11_ui =
 	.padding     = x11_make_padding,
 	.label       = x11_make_label,
 
+	.beep        = x11_beep,
 	.render      = x11_render,
 	.flip        = x11_flip,
 	.destroy     = x11_destroy,
@@ -2216,6 +2232,12 @@ appkit_render_widget (struct widget *w, NSRect clip)
 }
 
 static void
+appkit_beep (void)
+{
+	NSBeep ();
+}
+
+static void
 appkit_render (void)
 {
 	@autoreleasepool
@@ -2270,6 +2292,7 @@ static struct ui appkit_ui =
 	.padding     = appkit_make_padding,
 	.label       = appkit_make_label,
 
+	.beep        = appkit_beep,
 	.render      = appkit_render,
 	.flip        = appkit_flip,
 	.destroy     = appkit_destroy,
@@ -2563,70 +2586,70 @@ appkit_send_focus_event (bool focused)
 - (void) keyDown:(NSEvent *)event
 {
 	if (!on_appkit_key_down (event))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) mouseDown:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_PRESS, 1))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) mouseUp:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_RELEASE, 1))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) rightMouseDown:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_PRESS, 3))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) rightMouseUp:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_RELEASE, 3))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) otherMouseDown:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event,
 		TERMO_MOUSE_PRESS, appkit_mouse_button (event)))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) otherMouseUp:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event,
 		TERMO_MOUSE_RELEASE, appkit_mouse_button (event)))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) mouseDragged:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_DRAG, 1))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) rightMouseDragged:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event, TERMO_MOUSE_DRAG, 3))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) otherMouseDragged:(NSEvent *)event
 {
 	if (!on_appkit_mouse_event (event,
 		TERMO_MOUSE_DRAG, appkit_mouse_button (event)))
-		NSBeep ();
+		appkit_beep ();
 }
 
 - (void) scrollWheel:(NSEvent *)event
 {
 	if (!on_appkit_scroll_event (event))
-		NSBeep ();
+		appkit_beep ();
 }
 
 @end
