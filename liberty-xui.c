@@ -16,6 +16,8 @@
  *
  */
 
+#include <math.h>
+
 // This file includes some common stuff to build terminal/X11 applications with.
 // It assumes you've already included liberty.c, and may include liberty-xdg.c.
 
@@ -599,7 +601,7 @@ struct widget
 
 	int widget_id;                      ///< Post-layouting identification
 	int userdata;                       ///< Action ID/Tab index/...
-	char text[];                        ///< Any text label
+	char *text;                         ///< Any text label
 };
 
 static void
@@ -621,12 +623,97 @@ widget_move (struct widget *w, int dx, int dy)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+// Use {INFINITY, INFINITY} once for stopping a subpath, twice to end icon data.
+struct xui_icon_point
+{
+	double x;
+	double y;
+};
+
+struct xui_symbol
+{
+	struct widget widget;
+	const struct xui_icon_point *icon;
+};
+
+struct xui_gauge
+{
+	struct widget widget;
+	double fraction;
+};
+
+struct xui_scrollbar
+{
+	struct widget widget;
+	long top;
+	long total;
+};
+
+// XXX: This is a rather dirty simplification.
+static struct widget *
+xui_new_symbol (struct widget *label, const struct xui_icon_point *icon)
+{
+	if (!icon)
+		return label;
+
+	size_t len = strlen (label->text) + 1;
+	struct xui_symbol *self = xcalloc (1, sizeof *self + len);
+	self->widget = *label;
+	self->widget.text = memcpy (self + 1, label->text, len);
+	self->icon = icon;
+	free (label);
+	return &self->widget;
+}
+
+struct xui_scrollbar_part
+{
+	long length;
+	long start;
+};
+
+/// Figure out scrollbar appearance.  @a s is the minimal slider length as well
+/// as the scrollbar resolution per visible item.
+static struct xui_scrollbar_part
+xui_compute_scrollbar (const struct xui_scrollbar *self, long visible, long s)
+{
+	long top = s * self->top, total = s * self->total;
+	if (total < visible)
+		return (struct xui_scrollbar_part) { 0, 0 };
+	if (visible == 1)
+		return (struct xui_scrollbar_part) { s, 0 };
+	if (visible == 2)
+		return (struct xui_scrollbar_part)
+			{ s, top >= total / 2 ? s : 0 };
+
+	// Only be at the top or bottom when the top or bottom item can be seen.
+	// The algorithm isn't optimal but it's a bitch to get right.
+	double available_length = visible - 2 - s + 1;
+
+	double lenf = s + available_length * visible / total, length = 0.;
+	long offset = 1 + available_length * top / total + modf (lenf, &length);
+
+	if (top == 0)
+		return (struct xui_scrollbar_part) { length, 0 };
+	if (top + visible >= total)
+		return (struct xui_scrollbar_part) { length, visible - length };
+
+	return (struct xui_scrollbar_part) { length, offset };
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 struct ui
 {
 	struct widget *(*padding)
 		(chtype attrs, float width, float height);
 	struct widget *(*label)
 		(chtype attrs, unsigned extended, const char *label);
+	struct widget *(*symbol)
+		(chtype attrs, const char *label, const struct xui_icon_point *icon);
+	struct widget *(*gauge)
+		(chtype attrs, double fraction);
+	struct widget *(*scrollbar)
+		(chtype attrs, long top, long total);
 
 	void (*beep) (void);
 	void (*render) (void);
@@ -684,6 +771,7 @@ struct xui
 	struct poller_fd tty_event;         ///< Terminal input event
 	struct poller_timer tk_timer;       ///< termo timeout timer
 	bool locale_is_utf8;                ///< The locale is Unicode
+	bool use_partial_boxes;             ///< Use Unicode box drawing chars
 
 	// X11:
 
@@ -771,8 +859,8 @@ tui_render_padding (struct widget *self)
 static struct widget *
 tui_make_padding (chtype attrs, float width, float height)
 {
-	struct widget *w = xcalloc (1, sizeof *w + 2);
-	w->text[0] = ' ';
+	struct widget *w = xcalloc (1, sizeof *w);
+	w->text = " ";
 	w->on_render = tui_render_padding;
 	w->attrs = attrs;
 	w->width = width * 2;
@@ -791,10 +879,9 @@ tui_render_label (struct widget *self)
 static struct widget *
 tui_make_label (chtype attrs, unsigned extended, const char *label)
 {
-	(void) extended;
-
 	size_t len = strlen (label);
 	struct widget *w = xcalloc (1, sizeof *w + len + 1);
+	w->text = (char *) (w + 1);
 	w->on_render = tui_render_label;
 	w->attrs = attrs;
 	w->extended_attrs = extended;
@@ -806,6 +893,127 @@ tui_make_label (chtype attrs, unsigned extended, const char *label)
 	w->height = 1;
 	row_buffer_free (&buf);
 	return w;
+}
+
+static struct widget *
+tui_make_symbol (chtype attrs, const char *label,
+	const struct xui_icon_point *icon)
+{
+	(void) icon;
+	return tui_make_label (attrs, 0, label);
+}
+
+static void
+tui_render_gauge (struct widget *widget)
+{
+	const struct xui_gauge *self = (const struct xui_gauge *) widget;
+	struct row_buffer buf = row_buffer_make ();
+
+	// Always compute it in exactly eight times the resolution,
+	// because sometimes Unicode is even useful
+	int len_left = self->fraction * widget->width * 8 + 0.5;
+
+	static const char *partials[] = { " ", "▏", "▎", "▍", "▌", "▋", "▊", "▉" };
+	int remainder = len_left % 8;
+	len_left /= 8;
+
+	const char *partial = NULL;
+	if (g_xui.use_partial_boxes)
+		partial = partials[remainder];
+	else
+		len_left += remainder >= 4;
+
+	int len_right = widget->width - len_left;
+	row_buffer_space (&buf, len_left, widget->attrs ^ A_REVERSE);
+	if (partial && len_right-- > 0)
+		row_buffer_append (&buf, partial, widget->attrs);
+	row_buffer_space (&buf, len_right, widget->attrs);
+	tui_flush_buffer (widget, &buf);
+}
+
+static struct widget *
+tui_make_gauge (chtype attrs, double fraction)
+{
+	struct xui_gauge *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = tui_render_gauge;
+	self->widget.attrs = attrs;
+	self->widget.width = -1;
+	self->widget.height = 1;
+	self->fraction = MIN (MAX (fraction, 0.), 1.);
+	return &self->widget;
+}
+
+static void
+tui_render_scrollbar (struct widget *widget)
+{
+	// This assumes that we can write to the column, i.e.,
+	// that it's not covered by any double-wide character (and that
+	// ncurses comes to the right results when counting characters).
+	struct xui_scrollbar *self = (struct xui_scrollbar *) widget;
+	int visible = widget->height;
+
+	if (!g_xui.use_partial_boxes)
+	{
+		struct xui_scrollbar_part bar =
+			xui_compute_scrollbar (self, visible, 1);
+		for (int row = 0; row < visible; row++)
+		{
+			move (widget->y + row, widget->x);
+			chtype attrs = widget->attrs;
+			if (row >= bar.start && row < bar.start + bar.length)
+				attrs ^= A_REVERSE;
+			addch (' ' | attrs);
+		}
+		return;
+	}
+
+	struct xui_scrollbar_part bar =
+		xui_compute_scrollbar (self, visible * 8, 8);
+	bar.length += bar.start;
+
+	int start_part = bar.start  % 8; bar.start  /= 8;
+	int end_part   = bar.length % 8; bar.length /= 8;
+
+	// Even with this, the solid part must reach full cell boundaries.
+	// It turns out trying to use '█' is plainly asking for problems,
+	// so we turn it into inversion.
+	static const char *partials[] = { " ", "▇", "▆", "▅", "▄", "▃", "▂", "▁" };
+
+	for (int row = 0; row < visible; row++)
+	{
+		chtype attrs = widget->attrs;
+		if (row >= bar.start + !!start_part
+		 && row < bar.length + !!end_part)
+			attrs ^= A_REVERSE;
+
+		const char *glyph = NULL;
+		if (row == bar.start)  glyph = partials[start_part];
+		if (row == bar.length) glyph = partials[end_part];
+
+		move (widget->y + row, widget->x);
+
+		struct row_buffer buf = row_buffer_make ();
+		if (glyph)
+			row_buffer_append (&buf, glyph, attrs);
+		else
+			row_buffer_append_c (&buf, ' ', attrs);
+		row_buffer_flush (&buf);
+		row_buffer_free (&buf);
+	}
+}
+
+static struct widget *
+tui_make_scrollbar (chtype attrs, long top, long total)
+{
+	struct xui_scrollbar *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = tui_render_scrollbar;
+	self->widget.attrs = attrs;
+	self->widget.width = 1;
+	self->top = top;
+	self->total = total;
+	return &self->widget;
 }
 
 static void
@@ -876,6 +1084,9 @@ static struct ui tui_ui =
 {
 	.padding     = tui_make_padding,
 	.label       = tui_make_label,
+	.symbol      = tui_make_symbol,
+	.gauge       = tui_make_gauge,
+	.scrollbar   = tui_make_scrollbar,
 
 	.beep        = tui_beep,
 	.render      = tui_render,
@@ -1265,8 +1476,8 @@ x11_render_padding (struct widget *self)
 static struct widget *
 x11_make_padding (chtype attrs, float width, float height)
 {
-	struct widget *w = xcalloc (1, sizeof *w + 2);
-	w->text[0] = ' ';
+	struct widget *w = xcalloc (1, sizeof *w);
+	w->text = " ";
 	w->on_render = x11_render_padding;
 	w->attrs = attrs;
 	w->width = g_xui.vunit * width;
@@ -1331,6 +1542,7 @@ x11_make_label (chtype attrs, unsigned extended, const char *label)
 	}
 
 	struct widget *w = xcalloc (1, sizeof *w + normalized_len);
+	w->text = (char *) (w + 1);
 	w->on_render = x11_render_label;
 	w->attrs = attrs;
 	w->extended_attrs = extended;
@@ -1341,6 +1553,131 @@ x11_make_label (chtype attrs, unsigned extended, const char *label)
 	w->width = x11_font_hadvance (font, w->text);
 	w->height = font->list->font->height;
 	return w;
+}
+
+static void
+x11_render_symbol (struct widget *widget)
+{
+	x11_render_padding (widget);
+
+	const struct xui_icon_point *icon =
+		((const struct xui_symbol *) widget)->icon;
+	size_t total = 0;
+	while (!isinf (icon[total].x)     || !isinf (icon[total].y)
+		|| !isinf (icon[total + 1].x) || !isinf (icon[total + 1].y))
+		total++;
+
+	// TODO: There might be an attribute for symbols, to handle this better.
+	XRenderColor color = *x11_fg (widget);
+	if (!(widget->attrs & A_BOLD))
+	{
+		color.alpha /= 2;
+		color.red /= 2;
+		color.green /= 2;
+		color.blue /= 2;
+	}
+
+	Picture source = XRenderCreateSolidFill (g_xui.dpy, &color);
+	const XRenderPictFormat *format
+		= XRenderFindStandardFormat (g_xui.dpy, PictStandardA8);
+
+	int x = widget->x, y = widget->y + (widget->height - widget->width) / 2;
+	XPointDouble buffer[total], *p = buffer;
+	for (size_t i = 0; i <= total; i++)
+		if (icon[i].x != INFINITY)
+		{
+			p->x = x + icon[i].x / 20.0 * widget->width;
+			p->y = y + icon[i].y / 20.0 * widget->width;
+			p++;
+		}
+		else if (p != buffer)
+		{
+			XRenderCompositeDoublePoly (g_xui.dpy, PictOpOver,
+				source, g_xui.x11_pixmap_picture, format,
+				0, 0, 0, 0, buffer, p - buffer, EvenOddRule);
+			p = buffer;
+		}
+	XRenderFreePicture (g_xui.dpy, source);
+}
+
+static struct widget *
+x11_make_symbol (chtype attrs, const char *label,
+	const struct xui_icon_point *icon)
+{
+	struct widget *w =
+		xui_new_symbol (x11_make_label (attrs, 0, label), icon);
+	if (icon)
+	{
+		w->on_render = x11_render_symbol;
+
+		// It should be padded by the caller horizontally.
+		w->height = g_xui.vunit;
+		w->width = w->height * 3 / 4;
+	}
+	return w;
+}
+
+static void
+x11_render_gauge (struct widget *widget)
+{
+	const struct xui_gauge *self = (const struct xui_gauge *) widget;
+
+	int part = self->fraction * widget->width;
+	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
+		x11_fg_attrs (widget->attrs),
+		widget->x,
+		widget->y,
+		part,
+		widget->height);
+	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
+		x11_bg_attrs (widget->attrs),
+		widget->x + part,
+		widget->y,
+		widget->width - part,
+		widget->height);
+}
+
+static struct widget *
+x11_make_gauge (chtype attrs, double fraction)
+{
+	struct xui_gauge *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = x11_render_gauge;
+	self->widget.attrs = attrs;
+	self->widget.width = -1;
+	self->widget.height = g_xui.vunit;
+	self->fraction = MIN (MAX (fraction, 0.), 1.);
+	return &self->widget;
+}
+
+static void
+x11_render_scrollbar (struct widget *widget)
+{
+	struct xui_scrollbar *self = (struct xui_scrollbar *) widget;
+	x11_render_padding (widget);
+
+	struct xui_scrollbar_part bar =
+		xui_compute_scrollbar (self, widget->height, g_xui.vunit);
+
+	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
+		x11_fg_attrs (widget->attrs),
+		widget->x,
+		widget->y + bar.start,
+		widget->width,
+		bar.length);
+}
+
+static struct widget *
+x11_make_scrollbar (chtype attrs, long top, long total)
+{
+	struct xui_scrollbar *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = x11_render_scrollbar;
+	self->widget.attrs = attrs;
+	self->widget.width = g_xui.vunit / 2;
+	self->top = top;
+	self->total = total;
+	return &self->widget;
 }
 
 static void
@@ -1452,6 +1789,9 @@ static struct ui x11_ui =
 {
 	.padding     = x11_make_padding,
 	.label       = x11_make_label,
+	.symbol      = x11_make_symbol,
+	.gauge       = x11_make_gauge,
+	.scrollbar   = x11_make_scrollbar,
 
 	.beep        = x11_beep,
 	.render      = x11_render,
@@ -2176,8 +2516,8 @@ appkit_render_padding (struct widget *self)
 static struct widget *
 appkit_make_padding (chtype attrs, float width, float height)
 {
-	struct widget *w = xcalloc (1, sizeof *w + 2);
-	w->text[0] = ' ';
+	struct widget *w = xcalloc (1, sizeof *w);
+	w->text = " ";
 	w->on_render = appkit_render_padding;
 	w->attrs = attrs;
 	w->width = g_xui.vunit * width;
@@ -2205,6 +2545,7 @@ appkit_make_label (chtype attrs, unsigned extended, const char *label)
 	size_t label_len = strlen (label) + 1;
 
 	struct widget *w = xcalloc (1, sizeof *w + label_len);
+	w->text = (char *) (w + 1);
 	w->on_render = appkit_render_label;
 	w->attrs = attrs;
 	w->extended_attrs = extended;
@@ -2214,6 +2555,118 @@ appkit_make_label (chtype attrs, unsigned extended, const char *label)
 	w->width = appkit_font_hadvance (font, w->text);
 	w->height = g_xui.vunit;
 	return w;
+}
+
+static void
+appkit_render_symbol (struct widget *widget)
+{
+	appkit_render_padding (widget);
+
+	const struct xui_icon_point *icon =
+		((const struct xui_symbol *) widget)->icon;
+
+	// TODO: There might be an attribute for symbols, to handle this better.
+	NSColor *color = appkit_fg (widget);
+	if (!(widget->attrs & A_BOLD))
+		color = [color colorWithAlphaComponent:[color alphaComponent] * 0.5];
+
+	[color setFill];
+	NSBezierPath *path = [NSBezierPath bezierPath];
+	[path setWindingRule:NSWindingRuleEvenOdd];
+
+	int x = widget->x, y = widget->y + (widget->height - widget->width) / 2;
+	bool started = false;
+	for (const struct xui_icon_point *p = icon;
+		!isinf (p[0].x) || !isinf (p[0].y)
+	 || !isinf (p[1].x) || !isinf (p[1].y); p++)
+	{
+		if (isinf (p->x))
+		{
+			[path closePath];
+			started = false;
+			continue;
+		}
+
+		NSPoint point = NSMakePoint
+			(x + p->x / 20.0 * widget->width,
+			 y + p->y / 20.0 * widget->width);
+		if (!started)
+			[path moveToPoint:point];
+		else
+			[path lineToPoint:point];
+		started = true;
+	}
+	[path fill];
+}
+
+static struct widget *
+appkit_make_symbol (chtype attrs, const char *label,
+	const struct xui_icon_point *icon)
+{
+	struct widget *w =
+		xui_new_symbol (appkit_make_label (attrs, 0, label), icon);
+	if (icon)
+	{
+		w->on_render = appkit_render_symbol;
+
+		// It should be padded by the caller horizontally.
+		w->height = g_xui.vunit;
+		w->width = w->height * 3 / 4;
+	}
+	return w;
+}
+
+static void
+appkit_render_gauge (struct widget *widget)
+{
+	const struct xui_gauge *self = (const struct xui_gauge *) widget;
+
+	int part = self->fraction * widget->width;
+	[appkit_fg_attrs (widget->attrs) setFill];
+	NSRectFill (NSMakeRect (widget->x, widget->y, part, widget->height));
+	[appkit_bg_attrs (widget->attrs) setFill];
+	NSRectFill (NSMakeRect (widget->x + part, widget->y,
+		widget->width - part, widget->height));
+}
+
+static struct widget *
+appkit_make_gauge (chtype attrs, double fraction)
+{
+	struct xui_gauge *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = appkit_render_gauge;
+	self->widget.attrs = attrs;
+	self->widget.width = -1;
+	self->widget.height = g_xui.vunit;
+	self->fraction = MIN (MAX (fraction, 0.), 1.);
+	return &self->widget;
+}
+
+static void
+appkit_render_scrollbar (struct widget *widget)
+{
+	struct xui_scrollbar *self = (struct xui_scrollbar *) widget;
+	appkit_render_padding (widget);
+
+	struct xui_scrollbar_part bar =
+		xui_compute_scrollbar (self, widget->height, g_xui.vunit);
+
+	[appkit_fg_attrs (widget->attrs) setFill];
+	NSRectFill (NSMakeRect
+		(widget->x, widget->y + bar.start, widget->width, bar.length));
+}
+
+static struct widget *
+appkit_make_scrollbar (chtype attrs, long top, long total)
+{
+	struct xui_scrollbar *self = xcalloc (1, sizeof *self);
+	self->widget.text = "";
+	self->widget.on_render = appkit_render_scrollbar;
+	self->widget.attrs = attrs;
+	self->widget.width = g_xui.vunit / 2;
+	self->top = top;
+	self->total = total;
+	return &self->widget;
 }
 
 static void
@@ -2297,6 +2750,9 @@ static struct ui appkit_ui =
 {
 	.padding     = appkit_make_padding,
 	.label       = appkit_make_label,
+	.symbol      = appkit_make_symbol,
+	.gauge       = appkit_make_gauge,
+	.scrollbar   = appkit_make_scrollbar,
 
 	.beep        = appkit_beep,
 	.render      = appkit_render,
@@ -2928,6 +3384,7 @@ static struct widget *
 xui_hbox (struct widget *head)
 {
 	struct widget *self = xcalloc (1, sizeof *self);
+	self->text = "";
 	self->children = head;
 	self->on_allocated = xui_on_hbox_allocated;
 
@@ -2981,6 +3438,7 @@ static struct widget *
 xui_vbox (struct widget *head)
 {
 	struct widget *self = xcalloc (1, sizeof *self);
+	self->text = "";
 	self->children = head;
 	self->on_allocated = xui_on_vbox_allocated;
 
@@ -3055,6 +3513,9 @@ xui_preinit (void)
 	// since the locale name is canonicalized by locale_charset().
 	// Note that non-Unicode locales are handled pretty inefficiently.
 	g_xui.locale_is_utf8 = !strcasecmp_ascii (locale_charset (), "UTF-8");
+
+	// It doesn't work 100% (e.g. incompatible with underlining in urxvt)
+	g_xui.use_partial_boxes = g_xui.locale_is_utf8;
 
 	// Presumably, although not necessarily; unsure if queryable at all.
 	g_xui.focused = true;
