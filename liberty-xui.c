@@ -1735,6 +1735,8 @@ x11_beep (void)
 static void
 x11_render (void)
 {
+	XRenderChangePicture (g_xui.dpy, g_xui.x11_pixmap_picture, CPClipMask,
+		&(XRenderPictureAttributes) { .clip_mask = None });
 	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
 		&x11_default_bg, 0, 0, g_xui.width, g_xui.height);
 
