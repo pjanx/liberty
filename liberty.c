@@ -108,6 +108,17 @@ extern char **environ;
 #define ATTRIBUTE_SENTINEL
 #endif // ! __GNUC__ || __GNUC__ < 4
 
+// Since Clang 2.9 and later GCC 5
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
+#if __has_attribute (nonstring)
+#define ATTRIBUTE_NONSTRING __attribute__ ((nonstring))
+#else
+#define ATTRIBUTE_NONSTRING
+#endif
+
 #define N_ELEMENTS(a) (sizeof (a) / sizeof ((a)[0]))
 
 #define BLOCK_START  do {
@@ -838,7 +849,7 @@ random_bytes (void *output, size_t len, struct error **e)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-static unsigned char g_siphash_key[16] = "SipHash 2-4 key!";
+static unsigned char g_siphash_key[16] ATTRIBUTE_NONSTRING = "SipHash 2-4 key!";
 
 static inline void
 siphash_wrapper_randomize (void)
