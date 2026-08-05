@@ -772,6 +772,8 @@ struct xui
 	struct poller_timer tk_timer;       ///< termo timeout timer
 	bool locale_is_utf8;                ///< The locale is Unicode
 	bool use_partial_boxes;             ///< Use Unicode box drawing chars
+	int tui_clip_top;                   ///< Top row of the current clip region
+	int tui_clip_bottom;                ///< Bottom of the current clip region
 
 	// X11:
 
@@ -835,12 +837,13 @@ xui_process_termo_event (termo_key_t *event)
 // --- TUI ---------------------------------------------------------------------
 
 static void
-tui_flush_buffer (const struct widget *self, struct row_buffer *buf)
+tui_flush_buffer (const struct widget *self, int row, struct row_buffer *buf)
 {
-	move (self->y, self->x);
-
-	if (self->y >= 0 && self->y < g_xui.height)
+	int y = self->y + row;
+	if (y >= g_xui.tui_clip_top && y < g_xui.tui_clip_bottom)
 	{
+		move (y, self->x);
+
 		int space = MIN (self->width, g_xui.width - self->x);
 		row_buffer_align (buf, space, self->attrs);
 		row_buffer_flush (buf);
@@ -851,12 +854,10 @@ tui_flush_buffer (const struct widget *self, struct row_buffer *buf)
 static void
 tui_render_padding (struct widget *self)
 {
-	struct widget line = *self;
 	for (int y = 0; y < self->height; y++)
 	{
 		struct row_buffer buf = row_buffer_make ();
-		tui_flush_buffer (&line, &buf);
-		line.y++;
+		tui_flush_buffer (self, y, &buf);
 	}
 }
 
@@ -879,7 +880,7 @@ tui_render_label (struct widget *self)
 
 	struct row_buffer buf = row_buffer_make ();
 	row_buffer_append (&buf, self->text, self->attrs);
-	tui_flush_buffer (self, &buf);
+	tui_flush_buffer (self, 0, &buf);
 }
 
 static struct widget *
@@ -934,7 +935,7 @@ tui_render_gauge (struct widget *widget)
 	if (partial && len_right-- > 0)
 		row_buffer_append (&buf, partial, widget->attrs);
 	row_buffer_space (&buf, len_right, widget->attrs);
-	tui_flush_buffer (widget, &buf);
+	tui_flush_buffer (widget, 0, &buf);
 }
 
 static struct widget *
@@ -965,11 +966,14 @@ tui_render_scrollbar (struct widget *widget)
 			xui_compute_scrollbar (self, visible, 1);
 		for (int row = 0; row < visible; row++)
 		{
-			move (widget->y + row, widget->x);
 			chtype attrs = widget->attrs;
 			if (row >= bar.start && row < bar.start + bar.length)
 				attrs ^= A_REVERSE;
-			addch (' ' | attrs);
+
+			// This should theoretically loop to self->width.
+			struct row_buffer buf = row_buffer_make ();
+			row_buffer_append_c (&buf, ' ', attrs);
+			tui_flush_buffer (widget, row, &buf);
 		}
 		return;
 	}
@@ -997,15 +1001,13 @@ tui_render_scrollbar (struct widget *widget)
 		if (row == bar.start)  glyph = partials[start_part];
 		if (row == bar.length) glyph = partials[end_part];
 
-		move (widget->y + row, widget->x);
-
+		// This should theoretically loop to self->width.
 		struct row_buffer buf = row_buffer_make ();
 		if (glyph)
 			row_buffer_append (&buf, glyph, attrs);
 		else
 			row_buffer_append_c (&buf, ' ', attrs);
-		row_buffer_flush (&buf);
-		row_buffer_free (&buf);
+		tui_flush_buffer (widget, row, &buf);
 	}
 }
 
@@ -1023,16 +1025,22 @@ tui_make_scrollbar (chtype attrs, long top, long total)
 }
 
 static void
-tui_render_widgets (struct widget *head)
+tui_render_widget (struct widget *w, int clip_top, int clip_bottom)
 {
-	LIST_FOR_EACH (struct widget, w, head)
-	{
-		if (w->width < 0 || w->height < 0)
-			continue;
-		if (w->on_render)
-			w->on_render (w);
-		tui_render_widgets (w->children);
-	}
+	int subclip_top = MAX (clip_top, w->y);
+	int subclip_bottom = MIN (clip_bottom, w->y + w->height);
+	if (w->width < 0 || subclip_top >= subclip_bottom)
+		return;
+
+	// We should also clip horizontally, but this feature has no users,
+	// and it's needlessly complex to handle.
+	g_xui.tui_clip_top = clip_top;
+	g_xui.tui_clip_bottom = clip_bottom;
+	if (w->on_render)
+		w->on_render (w);
+
+	LIST_FOR_EACH (struct widget, child, w->children)
+		tui_render_widget (child, subclip_top, subclip_bottom);
 }
 
 static void
@@ -1045,7 +1053,12 @@ static void
 tui_render (void)
 {
 	erase ();
-	tui_render_widgets (g_xui.widgets);
+	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
+		tui_render_widget (w, 0, g_xui.height);
+
+	// To enable independent renders.
+	g_xui.tui_clip_top = 0;
+	g_xui.tui_clip_bottom = g_xui.height;
 }
 
 static void
