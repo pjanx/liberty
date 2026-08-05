@@ -835,7 +835,7 @@ xui_process_termo_event (termo_key_t *event)
 // --- TUI ---------------------------------------------------------------------
 
 static void
-tui_flush_buffer (struct widget *self, struct row_buffer *buf)
+tui_flush_buffer (const struct widget *self, struct row_buffer *buf)
 {
 	move (self->y, self->x);
 
@@ -851,9 +851,13 @@ tui_flush_buffer (struct widget *self, struct row_buffer *buf)
 static void
 tui_render_padding (struct widget *self)
 {
-	// TODO: This should work even for heights != 1.
-	struct row_buffer buf = row_buffer_make ();
-	tui_flush_buffer (self, &buf);
+	struct widget line = *self;
+	for (int y = 0; y < self->height; y++)
+	{
+		struct row_buffer buf = row_buffer_make ();
+		tui_flush_buffer (&line, &buf);
+		line.y++;
+	}
 }
 
 static struct widget *
@@ -871,6 +875,8 @@ tui_make_padding (chtype attrs, float width, float height)
 static void
 tui_render_label (struct widget *self)
 {
+	tui_render_padding (self);
+
 	struct row_buffer buf = row_buffer_make ();
 	row_buffer_append (&buf, self->text, self->attrs);
 	tui_flush_buffer (self, &buf);
