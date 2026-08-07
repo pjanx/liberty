@@ -772,6 +772,7 @@ struct xui
 	struct poller_timer tk_timer;       ///< termo timeout timer
 	bool locale_is_utf8;                ///< The locale is Unicode
 	bool use_partial_boxes;             ///< Use Unicode box drawing chars
+	bool tui_suspended;                 ///< TUI is released to a child process
 	int tui_clip_top;                   ///< Top row of the current clip region
 	int tui_clip_bottom;                ///< Bottom of the current clip region
 
@@ -785,6 +786,15 @@ struct xui
 	struct poller_idle xpending_event;  ///< X11 events possibly in I/O queues
 	int xkb_base_event_code;            ///< Xkb base event code
 	Window x11_window;                  ///< Application window
+	Window x11_embed_socket;            ///< Socket for an embedded X11 client
+	Window x11_embed_plug;              ///< Embedded X11 client window
+	bool x11_embed_active;              ///< Outer X11 window is active
+	bool x11_embed_mapped;              ///< Plug is mapped by XEmbed request
+	unsigned long x11_embed_version;    ///< Negotiated XEmbed protocol version
+	int x11_embed_left;                 ///< Embedded socket's left border
+	int x11_embed_top;                  ///< Embedded socket's top border
+	int x11_embed_right;                ///< Embedded socket's right border
+	int x11_embed_bottom;               ///< Embedded socket's bottom border
 	Pixmap x11_pixmap;                  ///< Off-screen bitmap
 	Region x11_clip;                    ///< Invalidated region
 	Picture x11_pixmap_picture;         ///< XRender wrap for x11_pixmap
@@ -823,7 +833,8 @@ g_xui;
 static void
 xui_invalidate (void)
 {
-	poller_idle_set (&g_xui.refresh_event);
+	if (!g_xui.tui_suspended)
+		poller_idle_set (&g_xui.refresh_event);
 }
 
 static bool
@@ -1114,6 +1125,34 @@ static struct ui tui_ui =
 	.destroy     = tui_destroy,
 };
 
+static void
+xui_tui_suspend (void)
+{
+	hard_assert (g_xui.ui == &tui_ui && !g_xui.tui_suspended);
+	g_xui.tui_suspended = true;
+
+	poller_idle_reset (&g_xui.refresh_event);
+	poller_idle_reset (&g_xui.flip_event);
+	poller_fd_reset (&g_xui.tty_event);
+	poller_timer_reset (&g_xui.tk_timer);
+
+	endwin ();
+	termo_stop (g_xui.tk);
+}
+
+static void
+xui_tui_resume (void)
+{
+	hard_assert (g_xui.ui == &tui_ui && g_xui.tui_suspended);
+	if (!termo_start (g_xui.tk))
+		exit_fatal ("failed to set up the terminal");
+
+	g_xui.tui_suspended = false;
+	poller_fd_set (&g_xui.tty_event, POLLIN);
+	poller_timer_set (&g_xui.tk_timer, 0);
+	tui_winch ();
+}
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 static void
@@ -1166,7 +1205,11 @@ tui_on_tty_readable (const struct pollfd *fd, void *user_data)
 	int64_t event_ts = clock_msec (CLOCK_BEST);
 	termo_result_t res;
 	while ((res = termo_getkey (g_xui.tk, &event)) == TERMO_RES_KEY)
+	{
 		tui_on_tty_event (&event, event_ts);
+		if (!termo_is_started (g_xui.tk))
+			return;
+	}
 
 	if (res == TERMO_RES_AGAIN)
 		poller_timer_set (&g_xui.tk_timer, termo_get_waittime (g_xui.tk));
@@ -1784,6 +1827,8 @@ x11_flip (void)
 static void
 x11_destroy (void)
 {
+	if (g_xui.x11_embed_socket)
+		XDestroyWindow (g_xui.dpy, g_xui.x11_embed_socket);
 	XDestroyIC (g_xui.x11_ic);
 	XCloseIM (g_xui.x11_im);
 	XDestroyRegion (g_xui.x11_clip);
@@ -2122,9 +2167,341 @@ out:
 	XSendEvent (g_xui.dpy, ev->requestor, False, 0, &response);
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+// Simple XEmbed integration that takes over all input.
+// It seems to work and that's enough.
+
+enum
+{
+	X11_XEMBED_VERSION = 1,
+	X11_XEMBED_MAPPED = 1 << 0,
+	X11_XEMBED_FOCUS_WRAPAROUND = 1 << 0,
+};
+
+enum
+{
+	X11_XEMBED_EMBEDDED_NOTIFY,
+	X11_XEMBED_WINDOW_ACTIVATE,
+	X11_XEMBED_WINDOW_DEACTIVATE,
+	X11_XEMBED_REQUEST_FOCUS,
+	X11_XEMBED_FOCUS_IN,
+	X11_XEMBED_FOCUS_OUT,
+	X11_XEMBED_FOCUS_NEXT,
+	X11_XEMBED_FOCUS_PREV,
+};
+
+enum
+{
+	X11_XEMBED_FOCUS_CURRENT,
+	X11_XEMBED_FOCUS_FIRST,
+	X11_XEMBED_FOCUS_LAST,
+};
+
+static void
+x11_embed_send (long message, long detail, long data1, long data2)
+{
+	XEvent event = {};
+	event.xclient.type = ClientMessage;
+	event.xclient.window = g_xui.x11_embed_plug;
+	event.xclient.message_type = XInternAtom (g_xui.dpy, "_XEMBED", False);
+	event.xclient.format = 32;
+	event.xclient.data.l[0] = CurrentTime;
+	event.xclient.data.l[1] = message;
+	event.xclient.data.l[2] = detail;
+	event.xclient.data.l[3] = data1;
+	event.xclient.data.l[4] = data2;
+	XSendEvent (g_xui.dpy, g_xui.x11_embed_plug, False, NoEventMask, &event);
+}
+
+static bool
+x11_embed_info (Window plug, unsigned long *version, unsigned long *flags)
+{
+	Atom xembed_info = XInternAtom (g_xui.dpy, "_XEMBED_INFO", False);
+	Atom type = None;
+	int format = 0;
+	unsigned long nitems = 0, after = 0;
+	unsigned char *data = NULL;
+	int status = XGetWindowProperty (g_xui.dpy, plug, xembed_info,
+		0, 2, False, xembed_info, &type, &format, &nitems, &after, &data);
+	if (status != Success || type != xembed_info || format != 32 || nitems < 2)
+	{
+		if (data)
+			XFree (data);
+		return false;
+	}
+
+	if (version)
+		*version = ((unsigned long *) data)[0];
+	if (flags)
+		*flags = ((unsigned long *) data)[1];
+	XFree (data);
+	return true;
+}
+
+static void
+x11_embed_set_active (bool active)
+{
+	if (!g_xui.x11_embed_plug || active == g_xui.x11_embed_active)
+		return;
+
+	g_xui.x11_embed_active = active;
+	x11_embed_send (active
+		? X11_XEMBED_WINDOW_ACTIVATE
+		: X11_XEMBED_WINDOW_DEACTIVATE, 0, 0, 0);
+}
+
+static void
+x11_embed_focus (long detail, long flags)
+{
+	if (!g_xui.x11_embed_plug)
+		return;
+
+	XSetInputFocus (g_xui.dpy, g_xui.x11_window, RevertToParent, CurrentTime);
+	x11_embed_set_active (true);
+	x11_embed_send (X11_XEMBED_FOCUS_IN, detail, flags, 0);
+}
+
+static void
+x11_embed_resize (void)
+{
+	int width = MAX (1, g_xui.width -
+		g_xui.x11_embed_left - g_xui.x11_embed_right);
+	int height = MAX (1, g_xui.height -
+		g_xui.x11_embed_top - g_xui.x11_embed_bottom);
+
+	if (g_xui.x11_embed_socket)
+		XMoveResizeWindow (g_xui.dpy, g_xui.x11_embed_socket,
+			g_xui.x11_embed_left, g_xui.x11_embed_top, width, height);
+	if (g_xui.x11_embed_plug)
+		XMoveResizeWindow (g_xui.dpy, g_xui.x11_embed_plug,
+			0, 0, width, height);
+}
+
+static void
+x11_embed_set_mapped (bool mapped)
+{
+	if (!g_xui.x11_embed_plug || mapped == g_xui.x11_embed_mapped)
+		return;
+
+	g_xui.x11_embed_mapped = mapped;
+	if (mapped)
+	{
+		XMapWindow (g_xui.dpy, g_xui.x11_embed_socket);
+		XMapWindow (g_xui.dpy, g_xui.x11_embed_plug);
+		x11_embed_resize ();
+		x11_embed_focus (X11_XEMBED_FOCUS_FIRST, 0);
+	}
+	else
+		XUnmapWindow (g_xui.dpy, g_xui.x11_embed_plug);
+}
+
+static void
+x11_embed_send_configure (void)
+{
+	if (!g_xui.x11_embed_plug)
+		return;
+
+	Window child = None;
+	int x = 0, y = 0;
+	XTranslateCoordinates (g_xui.dpy, g_xui.x11_embed_plug,
+		RootWindow (g_xui.dpy, DefaultScreen (g_xui.dpy)),
+		0, 0, &x, &y, &child);
+
+	XEvent event = {};
+	event.xconfigure.type = ConfigureNotify;
+	event.xconfigure.event = g_xui.x11_embed_plug;
+	event.xconfigure.window = g_xui.x11_embed_plug;
+	event.xconfigure.x = x;
+	event.xconfigure.y = y;
+	event.xconfigure.width = MAX (1, g_xui.width -
+		g_xui.x11_embed_left - g_xui.x11_embed_right);
+	event.xconfigure.height = MAX (1, g_xui.height -
+		g_xui.x11_embed_top - g_xui.x11_embed_bottom);
+	event.xconfigure.border_width = 0;
+	event.xconfigure.above = None;
+	event.xconfigure.override_redirect = False;
+	XSendEvent (g_xui.dpy, g_xui.x11_embed_plug,
+		False, NoEventMask, &event);
+}
+
+static void
+x11_embed_end (void)
+{
+	Window socket = g_xui.x11_embed_socket;
+	g_xui.x11_embed_socket = None;
+	g_xui.x11_embed_plug = None;
+	g_xui.x11_embed_active = false;
+	g_xui.x11_embed_mapped = false;
+	g_xui.x11_embed_version = 0;
+	if (socket)
+		XDestroyWindow (g_xui.dpy, socket);
+	XSetInputFocus (g_xui.dpy, g_xui.x11_window, RevertToParent, CurrentTime);
+	xui_invalidate ();
+}
+
+/// Prepare an XEmbed socket within the given application window borders.
+/// Returns None when an existing embedded client was merely focused.
+static Window
+x11_embed_start (int left, int top, int right, int bottom)
+{
+	if (g_xui.x11_embed_plug)
+	{
+		x11_embed_focus (X11_XEMBED_FOCUS_CURRENT, 0);
+		return None;
+	}
+	if (g_xui.x11_embed_socket)
+		x11_embed_end ();
+
+	g_xui.x11_embed_left = left;
+	g_xui.x11_embed_top = top;
+	g_xui.x11_embed_right = right;
+	g_xui.x11_embed_bottom = bottom;
+	int width = MAX (1, g_xui.width - left - right);
+	int height = MAX (1, g_xui.height - top - bottom);
+	g_xui.x11_embed_socket = XCreateSimpleWindow (g_xui.dpy,
+		g_xui.x11_window, left, top, width, height, 0, 0, 0);
+	XSelectInput (g_xui.dpy, g_xui.x11_embed_socket,
+		SubstructureNotifyMask | SubstructureRedirectMask);
+	XFlush (g_xui.dpy);
+	return g_xui.x11_embed_socket;
+}
+
+static void
+x11_embed_attach (Window plug)
+{
+	if (g_xui.x11_embed_plug)
+		return;
+
+	g_xui.x11_embed_plug = plug;
+	XSelectInput (g_xui.dpy, plug, StructureNotifyMask | PropertyChangeMask);
+	x11_embed_resize ();
+
+	unsigned long version = X11_XEMBED_VERSION, flags = 0;
+	bool has_info = x11_embed_info (plug, &version, &flags);
+	g_xui.x11_embed_version = MIN (version, X11_XEMBED_VERSION);
+	x11_embed_send (X11_XEMBED_EMBEDDED_NOTIFY,
+		0, g_xui.x11_embed_socket, g_xui.x11_embed_version);
+
+	if (has_info)
+		x11_embed_set_mapped (flags & X11_XEMBED_MAPPED);
+}
+
+static bool
+x11_embed_process_event (XEvent *event)
+{
+	if (!g_xui.x11_embed_socket)
+		return false;
+
+	switch (event->type)
+	{
+	case CreateNotify:
+		if (event->xcreatewindow.parent == g_xui.x11_embed_socket)
+			x11_embed_attach (event->xcreatewindow.window);
+		return true;
+	case MapRequest:
+		if (event->xmaprequest.parent != g_xui.x11_embed_socket)
+			return false;
+		x11_embed_attach (event->xmaprequest.window);
+		if (event->xmaprequest.window != g_xui.x11_embed_plug)
+			return true;
+
+		unsigned long flags = 0;
+		bool mapped = !x11_embed_info (g_xui.x11_embed_plug, NULL, &flags)
+			|| (flags & X11_XEMBED_MAPPED);
+		x11_embed_set_mapped (mapped);
+		return true;
+	case ConfigureRequest:
+		if (event->xconfigurerequest.parent != g_xui.x11_embed_socket)
+			return false;
+
+		x11_embed_attach (event->xconfigurerequest.window);
+		if (event->xconfigurerequest.window != g_xui.x11_embed_plug)
+			return true;
+
+		x11_embed_resize ();
+		x11_embed_send_configure ();
+		return true;
+	case ConfigureNotify:
+		if (event->xconfigure.window != g_xui.x11_embed_plug
+		 && event->xconfigure.window != g_xui.x11_embed_socket)
+			return false;
+		return true;
+	case PropertyNotify:
+		if (event->xproperty.window != g_xui.x11_embed_plug)
+			return false;
+
+		if (event->xproperty.atom ==
+			XInternAtom (g_xui.dpy, "_XEMBED_INFO", False))
+		{
+			unsigned long flags = 0;
+			bool mapped = x11_embed_info (g_xui.x11_embed_plug, NULL, &flags)
+				&& (flags & X11_XEMBED_MAPPED);
+			x11_embed_set_mapped (mapped);
+		}
+		return true;
+	case DestroyNotify:
+		if (event->xdestroywindow.window != g_xui.x11_embed_plug)
+			return false;
+
+		x11_embed_end ();
+		return true;
+	case ReparentNotify:
+		if (!g_xui.x11_embed_plug)
+		{
+			if (event->xreparent.parent != g_xui.x11_embed_socket)
+				return false;
+			x11_embed_attach (event->xreparent.window);
+			return true;
+		}
+		if (event->xreparent.window != g_xui.x11_embed_plug)
+			return false;
+		if (event->xreparent.parent != g_xui.x11_embed_socket)
+			x11_embed_end ();
+		return true;
+	case ClientMessage:
+		if (event->xclient.window != g_xui.x11_embed_socket
+		 || event->xclient.message_type !=
+			XInternAtom (g_xui.dpy, "_XEMBED", False))
+			return false;
+
+		long message = event->xclient.data.l[1];
+		if (message == X11_XEMBED_REQUEST_FOCUS)
+			x11_embed_focus (X11_XEMBED_FOCUS_CURRENT, 0);
+		else if (g_xui.x11_embed_version < 1)
+			/* Not GTK's version with X11_XEMBED_FOCUS_WRAPAROUND. */;
+		else if (message == X11_XEMBED_FOCUS_NEXT
+			&& !(event->xclient.data.l[3] & X11_XEMBED_FOCUS_WRAPAROUND))
+			x11_embed_focus (X11_XEMBED_FOCUS_FIRST,
+				X11_XEMBED_FOCUS_WRAPAROUND);
+		else if (message == X11_XEMBED_FOCUS_PREV
+			&& !(event->xclient.data.l[3] & X11_XEMBED_FOCUS_WRAPAROUND))
+			x11_embed_focus (X11_XEMBED_FOCUS_LAST,
+				X11_XEMBED_FOCUS_WRAPAROUND);
+		return true;
+	case KeyPress:
+	case KeyRelease:
+		if (event->xkey.window != g_xui.x11_window)
+			return false;
+
+		event->xkey.window = g_xui.x11_embed_plug;
+		event->xkey.subwindow = None;
+		event->xkey.x = event->xkey.y = 0;
+		XSendEvent (g_xui.dpy, g_xui.x11_embed_plug, False, NoEventMask, event);
+		return true;
+	default:
+		return false;
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 static void
 on_x11_event (XEvent *ev)
 {
+	if (x11_embed_process_event (ev))
+		return;
+
 	termo_key_t key = {};
 	switch (ev->type)
 	{
@@ -2143,6 +2520,7 @@ on_x11_event (XEvent *ev)
 
 		g_xui.width = ev->xconfigure.width;
 		g_xui.height = ev->xconfigure.height;
+		x11_embed_resize ();
 
 		XRenderFreePicture (g_xui.dpy, g_xui.x11_pixmap_picture);
 		XFreePixmap (g_xui.dpy, g_xui.x11_pixmap);
@@ -2160,14 +2538,25 @@ on_x11_event (XEvent *ev)
 	// Should this turn out to be unreliable (window not destroyed by WM
 	// upon closing), opt for the WM_DELETE_WINDOW protocol as well.
 	case DestroyNotify:
-		app_quit ();
+		if (ev->xdestroywindow.window == g_xui.x11_window)
+			app_quit ();
 		break;
 	case FocusIn:
+		if (ev->xfocus.window == g_xui.x11_window
+		 && ev->xfocus.detail != NotifyInferior
+		 && ev->xfocus.mode != NotifyGrab
+		 && ev->xfocus.mode != NotifyUngrab)
+			x11_embed_set_active (true);
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = true;
 		xui_process_termo_event (&key);
 		break;
 	case FocusOut:
+		if (ev->xfocus.window == g_xui.x11_window
+		 && ev->xfocus.detail != NotifyInferior
+		 && ev->xfocus.mode != NotifyGrab
+		 && ev->xfocus.mode != NotifyUngrab)
+			x11_embed_set_active (false);
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = false;
 		xui_process_termo_event (&key);
@@ -2191,7 +2580,9 @@ on_x11_pending (void *user_data)
 	{
 		if (XNextEvent (g_xui.dpy, &ev.core))
 			exit_fatal ("XNextEvent returned non-zero");
-		if (XFilterEvent (&ev.core, None))
+		if ((!g_xui.x11_embed_plug
+			|| (ev.core.type != KeyPress && ev.core.type != KeyRelease))
+		 && XFilterEvent (&ev.core, None))
 			continue;
 
 		on_x11_event (&ev.core);
@@ -2343,8 +2734,8 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	XSetWindowAttributes attrs =
 	{
 		.event_mask = StructureNotifyMask | ExposureMask | FocusChangeMask
-			| KeyPressMask | ButtonPressMask | ButtonReleaseMask
-			| Button1MotionMask,
+			| KeyPressMask | KeyReleaseMask
+			| ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
 		.bit_gravity = NorthWestGravity,
 		.background_pixel = default_bg.pixel,
 	};
