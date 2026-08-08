@@ -1,5 +1,5 @@
 /*
- * liberty-xui.c: the ultimate C unlibrary: hybrid terminal/X11 UI
+ * liberty-xui.c: the ultimate C unlibrary: hybrid terminal/X11/AppKit UI
  *
  * Copyright (c) 2016 - 2026, Přemysl Eric Janouch <p@janouch.name>
  *
@@ -18,7 +18,7 @@
 
 #include <math.h>
 
-// This file includes some common stuff to build terminal/X11 applications with.
+// This file includes utilities to build terminal/X11/AppKit applications with.
 // It assumes you've already included liberty.c, and may include liberty-xdg.c.
 
 #include <ncurses.h>
@@ -54,7 +54,7 @@
 #include <sys/ioctl.h>
 #endif  // HAVE_RESIZETERM
 
-// ncurses is notoriously retarded for input handling, and in past versions
+// ncurses has notoriously retarded input handling, and in past versions
 // used to process mouse events unreliably.  Moreover, rxvt-unicode only
 // supports the 1006 mode that ncurses also supports mode starting with 9.25.
 #include "termo.h"
@@ -62,7 +62,6 @@
 // Carefully chosen to limit the possibility of ever hitting termo keymods.
 enum { XUI_KEYMOD_DOUBLE_CLICK = 1 << 15 };
 
-// Elementary port of TUI facilities to X11.
 #ifdef LIBERTY_XUI_WANT_X11
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -767,7 +766,7 @@ struct xui
 
 	// Terminal:
 
-	termo_t *tk;                        ///< termo handle (TUI/X11)
+	termo_t *tk;                        ///< termo handle (TUI/X11/AppKit)
 	struct poller_fd tty_event;         ///< Terminal input event
 	struct poller_timer tk_timer;       ///< termo timeout timer
 	bool locale_is_utf8;                ///< The locale is Unicode
