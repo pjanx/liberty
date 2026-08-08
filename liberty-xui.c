@@ -1592,23 +1592,33 @@ x11_render_label (struct widget *self)
 static struct widget *
 x11_make_label (chtype attrs, unsigned extended, const char *label)
 {
+	const uint8_t *text = (const uint8_t *) label;
+	size_t text_len = strlen (label) + 1;
+
 	// Xft renders combining marks by themselves, NFC improves it a bit.
 	// We'd have to use HarfBuzz to do this correctly.
-	size_t label_len = strlen (label) + 1, normalized_len = 0;
-	uint8_t *normalized = u8_normalize (UNINORM_NFC,
-		(const uint8_t *) label, label_len, NULL, &normalized_len);
-	if (!normalized)
+	uint8_t *normalized = NULL;
+	size_t normalized_len = 0;
+	bool ascii = true;
+	for (const uint8_t *p = text, *end = p + text_len; p != end; p++)
+		if (*p & 0x80)
+		{
+			ascii = false;
+			break;
+		}
+	if (!ascii && (normalized =
+		u8_normalize (UNINORM_NFC, text, text_len, NULL, &normalized_len)))
 	{
-		normalized = memcpy (xmalloc (label_len), label, label_len);
-		normalized_len = label_len;
+		text = normalized;
+		text_len = normalized_len;
 	}
 
-	struct widget *w = xcalloc (1, sizeof *w + normalized_len);
+	struct widget *w = xcalloc (1, sizeof *w + text_len);
 	w->text = (char *) (w + 1);
 	w->on_render = x11_render_label;
 	w->attrs = attrs;
 	w->extended_attrs = extended;
-	memcpy (w->text, normalized, normalized_len);
+	memcpy (w->text, text, text_len);
 	free (normalized);
 
 	struct x11_font *font = x11_widget_font (w);
