@@ -774,12 +774,18 @@ struct xui
 	bool tui_suspended;                 ///< TUI is released to a child process
 	int tui_clip_top;                   ///< Top row of the current clip region
 	int tui_clip_bottom;                ///< Bottom of the current clip region
+	int tui_cursor_x;                   ///< Requested cursor column, or -1
+	int tui_cursor_y;                   ///< Requested cursor row, or -1
 
 	// X11:
 
 #ifdef LIBERTY_XUI_WANT_X11
 	XIM x11_im;                         ///< Input method
 	XIC x11_ic;                         ///< Input method context
+	XFontSet x11_im_fontset;            ///< Fonts for positional preediting
+	XIMStyle x11_im_style;              ///< Negotiated input method style
+	XPoint x11_im_spot;                 ///< Last reported input caret baseline
+	unsigned x11_im_spot_set;           ///< x11_im_spot has been reported
 	Display *dpy;                       ///< X display handle
 	struct poller_fd x11_event;         ///< X11 events on wire
 	struct poller_idle xpending_event;  ///< X11 events possibly in I/O queues
@@ -1060,13 +1066,29 @@ tui_beep (void)
 }
 
 static void
+tui_set_cursor (int x, int y)
+{
+	g_xui.tui_cursor_x = x;
+	g_xui.tui_cursor_y = y;
+}
+
+static void
 tui_render (void)
 {
+	curs_set (0);
+	tui_set_cursor (-1, -1);
+
 	erase ();
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
 		tui_render_widget (w, 0, g_xui.height);
 
-	// To enable independent renders.
+	if (g_xui.tui_cursor_x >= 0 && g_xui.tui_cursor_y >= 0)
+	{
+		move (g_xui.tui_cursor_y, g_xui.tui_cursor_x);
+		curs_set (1);
+	}
+
+	// To enable independent renders, though beware of the cursor.
 	g_xui.tui_clip_top = 0;
 	g_xui.tui_clip_bottom = g_xui.height;
 }
@@ -1804,6 +1826,34 @@ x11_beep (void)
 }
 
 static void
+x11_set_cursor (int x, int y)
+{
+	if (!(g_xui.x11_im_style & XIMPreeditPosition))
+		return;
+
+	XPoint spot = { x, y };
+	if (g_xui.x11_im_spot_set++
+	 && g_xui.x11_im_spot.x == spot.x && g_xui.x11_im_spot.y == spot.y)
+		return;
+
+	g_xui.x11_im_spot = spot;
+	g_xui.x11_im_spot_set = 1;
+	XVaNestedList preedit =
+		XVaCreateNestedList (0, XNSpotLocation, &spot, NULL);
+	if (!preedit)
+	{
+		print_warning ("failed to set input method spot location");
+		return;
+	}
+
+	const char *failed =
+		XSetICValues (g_xui.x11_ic, XNPreeditAttributes, preedit, NULL);
+	XFree (preedit);
+	if (failed)
+		print_warning ("failed to set input method attribute: %s", failed);
+}
+
+static void
 x11_render (void)
 {
 	XRenderChangePicture (g_xui.dpy, g_xui.x11_pixmap_picture, CPClipMask,
@@ -1811,12 +1861,18 @@ x11_render (void)
 	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
 		&x11_default_bg, 0, 0, g_xui.width, g_xui.height);
 
+	unsigned spot_set = g_xui.x11_im_spot_set;
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
 		x11_render_widget (w, NULL);
 
 	XRectangle r = { 0, 0, g_xui.width, g_xui.height };
 	XUnionRectWithRegion (&r, g_xui.x11_clip, g_xui.x11_clip);
 	poller_idle_set (&g_xui.xpending_event);
+
+	// IBus needs to have the spot placed somewhere,
+	// or it may end up on another display.
+	if (g_xui.x11_im_spot_set == spot_set)
+		x11_set_cursor (0, g_xui.height);
 }
 
 static void
@@ -1839,6 +1895,8 @@ x11_destroy (void)
 	if (g_xui.x11_embed_socket)
 		XDestroyWindow (g_xui.dpy, g_xui.x11_embed_socket);
 	XDestroyIC (g_xui.x11_ic);
+	if (g_xui.x11_im_fontset)
+		XFreeFontSet (g_xui.dpy, g_xui.x11_im_fontset);
 	XCloseIM (g_xui.x11_im);
 	XDestroyRegion (g_xui.x11_clip);
 	XDestroyWindow (g_xui.dpy, g_xui.x11_window);
@@ -2685,6 +2743,71 @@ x11_init_attributes (struct attrs *attrs, size_t attrs_len)
 	}
 }
 
+static XIMStyle
+x11_choose_input_style (void)
+{
+	static const XIMStyle preferred[] =
+	{
+		XIMPreeditPosition | XIMStatusNothing,
+		XIMPreeditPosition | XIMStatusNone,
+		XIMPreeditNothing  | XIMStatusNothing,
+		XIMPreeditNothing  | XIMStatusNone,
+	};
+
+	XIMStyles *supported = NULL;
+	if (XGetIMValues (g_xui.x11_im, XNQueryInputStyle, &supported, NULL)
+	 || !supported)
+		exit_fatal ("failed to query input method styles");
+
+	XIMStyle result = 0;
+	for (size_t i = 0; !result && i < N_ELEMENTS (preferred); i++)
+		for (unsigned j = 0; j < supported->count_styles; j++)
+			if (preferred[i] == supported->supported_styles[j])
+				result = preferred[i];
+	XFree (supported);
+
+	if (!result)
+		exit_fatal ("failed to find a supported input method style");
+	return result;
+}
+
+static XIC
+x11_init_input_context (void)
+{
+	if (!(g_xui.x11_im_style & XIMPreeditPosition))
+		return XCreateIC (g_xui.x11_im,
+			XNInputStyle, g_xui.x11_im_style,
+			XNClientWindow, g_xui.x11_window,
+			NULL);
+
+	// All I can say is that IBus doesn't care about these fonts,
+	// and setting the spot markedly enhances the experience.
+	char **missing = NULL;
+	int missing_len = 0;
+	char *default_string = NULL;
+	g_xui.x11_im_fontset = XCreateFontSet (g_xui.dpy, "*",
+		&missing, &missing_len, &default_string);
+	if (missing)
+		XFreeStringList (missing);
+	if (!g_xui.x11_im_fontset)
+		exit_fatal ("failed to open an input method font set");
+
+	XPoint spot = {};
+	XVaNestedList preedit = XVaCreateNestedList (0,
+		XNSpotLocation, &spot, XNFontSet, g_xui.x11_im_fontset, NULL);
+	if (!preedit)
+		return None;
+
+	XIC ic = XCreateIC (g_xui.x11_im,
+		XNInputStyle, g_xui.x11_im_style,
+		XNClientWindow, g_xui.x11_window,
+		XNFocusWindow, g_xui.x11_window,
+		XNPreeditAttributes, preedit,
+		NULL);
+	XFree (preedit);
+	return ic;
+}
+
 static void
 x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 {
@@ -2794,25 +2917,10 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	 && setting->type == XDG_XSETTINGS_INTEGER && setting->integer >= 0)
 		g_xui.x11_double_click_distance = setting->integer;
 
-	// TODO: It is possible to do, e.g., on-the-spot.
-	XIMStyle im_style = XIMPreeditNothing | XIMStatusNothing;
-	XIMStyles *im_styles = NULL;
-	bool im_style_found = false;
-	if (!XGetIMValues (g_xui.x11_im, XNQueryInputStyle, &im_styles, NULL)
-	 && im_styles)
-	{
-		for (unsigned i = 0; i < im_styles->count_styles; i++)
-			im_style_found |= im_styles->supported_styles[i] == im_style;
-		XFree (im_styles);
-	}
-	if (!im_style_found)
-		print_warning ("failed to find the desired input method style");
-	if (!(g_xui.x11_ic = XCreateIC (g_xui.x11_im,
-			XNInputStyle, im_style,
-			XNClientWindow, g_xui.x11_window,
-			NULL)))
+	g_xui.x11_im_style = x11_choose_input_style ();
+	g_xui.x11_ic = x11_init_input_context ();
+	if (!g_xui.x11_ic)
 		exit_fatal ("failed to open an input context");
-
 	XSetICFocus (g_xui.x11_ic);
 
 	x11_init_pixmap ();
