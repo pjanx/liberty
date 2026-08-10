@@ -157,6 +157,7 @@ enum line_editor_action
 	LINE_EDITOR_HOME,                   ///< Go to start of line
 	LINE_EDITOR_END,                    ///< Go to end of line
 
+	LINE_EDITOR_TRANSPOSE_CHARS,        ///< Transpose characters
 	LINE_EDITOR_UPCASE_WORD,            ///< Convert word to uppercase
 	LINE_EDITOR_DOWNCASE_WORD,          ///< Convert word to lowercase
 	LINE_EDITOR_CAPITALIZE_WORD,        ///< Capitalize word
@@ -310,6 +311,23 @@ line_editor_action (struct line_editor *self, enum line_editor_action action)
 		self->point = self->len;
 		return true;
 
+	case LINE_EDITOR_TRANSPOSE_CHARS:
+	{
+		// TODO(p): We should swap full characters rather than codepoints.
+		if (self->point < 1 || self->len < 2)
+			return false;
+		if (self->point == (int) self->len)
+			self->point--;
+
+		uint32_t cp = self->line[self->point];
+		int width   = self->w   [self->point];
+		self->line[self->point] = self->line[self->point - 1];
+		self->w   [self->point] = self->w   [self->point - 1];
+		self->line[self->point - 1] = cp;
+		self->w   [self->point - 1] = width;
+		self->point++;
+		return true;
+	}
 	case LINE_EDITOR_UPCASE_WORD:
 	{
 		int i = self->point;
