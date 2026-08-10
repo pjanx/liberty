@@ -2609,21 +2609,26 @@ on_x11_event (XEvent *ev)
 			app_quit ();
 		break;
 	case FocusIn:
-		if (ev->xfocus.window == g_xui.x11_window
-		 && ev->xfocus.detail != NotifyInferior
-		 && ev->xfocus.mode != NotifyGrab
-		 && ev->xfocus.mode != NotifyUngrab)
-			x11_embed_set_active (true);
+		if (ev->xfocus.window != g_xui.x11_window
+		 || ev->xfocus.detail == NotifyInferior
+		 || ev->xfocus.mode == NotifyGrab
+		 || ev->xfocus.mode == NotifyUngrab)
+			break;
+
+		x11_embed_set_active (true);
+		XSetICFocus (g_xui.x11_ic);
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = true;
 		xui_process_termo_event (&key);
 		break;
 	case FocusOut:
-		if (ev->xfocus.window == g_xui.x11_window
-		 && ev->xfocus.detail != NotifyInferior
-		 && ev->xfocus.mode != NotifyGrab
-		 && ev->xfocus.mode != NotifyUngrab)
-			x11_embed_set_active (false);
+		if (ev->xfocus.window != g_xui.x11_window
+		 || ev->xfocus.detail == NotifyInferior
+		 || ev->xfocus.mode == NotifyGrab
+		 || ev->xfocus.mode == NotifyUngrab)
+			break;
+
+		x11_embed_set_active (false);
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = false;
 		xui_process_termo_event (&key);
@@ -2748,8 +2753,9 @@ x11_choose_input_style (void)
 {
 	static const XIMStyle preferred[] =
 	{
-		XIMPreeditPosition | XIMStatusNothing,
-		XIMPreeditPosition | XIMStatusNone,
+		// TODO: Preedit positioning needs fixing.
+//		XIMPreeditPosition | XIMStatusNothing,
+//		XIMPreeditPosition | XIMStatusNone,
 		XIMPreeditNothing  | XIMStatusNothing,
 		XIMPreeditNothing  | XIMStatusNone,
 	};
@@ -2921,7 +2927,6 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	g_xui.x11_ic = x11_init_input_context ();
 	if (!g_xui.x11_ic)
 		exit_fatal ("failed to open an input context");
-	XSetICFocus (g_xui.x11_ic);
 
 	x11_init_pixmap ();
 	g_xui.xft_draw = XftDrawCreate (g_xui.dpy, g_xui.x11_pixmap, visual, cmap);
