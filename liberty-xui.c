@@ -87,6 +87,7 @@ static bool app_process_mouse (termo_mouse_event_t type,
 	int x, int y, int button, int modifiers);
 static bool app_on_insufficient_color (void);
 static void app_on_clipboard_copy (const char *text);
+static void app_on_clipboard_paste (const char *text);
 
 // This could be overridable, however thus far row_buffer and line_editor both
 // depend on XUI being initialized.
@@ -732,6 +733,8 @@ struct ui
 	struct widget *(*scrollbar)
 		(chtype attrs, long top, long total);
 
+	void (*request_clipboard) (void);
+
 	void (*beep) (void);
 	void (*render) (void);
 	void (*flip) (void);
@@ -798,17 +801,32 @@ struct xui
 	// X11:
 
 #ifdef LIBERTY_XUI_WANT_X11
+	Display *dpy;                       ///< X display handle
+	struct poller_fd x11_event;         ///< X11 events on wire
+	struct poller_idle xpending_event;  ///< X11 events possibly in I/O queues
+	int xkb_base_event_code;            ///< Xkb base event code
+	Window x11_window;                  ///< Application window
+	Time x11_timestamp;                 ///< Most recent X server timestamp
+
+	Pixmap x11_pixmap;                  ///< Off-screen bitmap
+	Region x11_clip;                    ///< Invalidated region
+	Picture x11_pixmap_picture;         ///< XRender wrap for x11_pixmap
+	XftDraw *xft_draw;                  ///< Xft rendering context
+	struct x11_font *xft_fonts;         ///< Font collection
+
+	char *x11_selection;                ///< CLIPBOARD selection contents we own
+	struct str x11_paste_buffer;        ///< Incoming CLIPBOARD UTF-8
+	Time x11_paste_in_progress;         ///< Timestamp of active paste request
+	bool x11_paste_incr;                ///< ICCCM INCR transfer running
+	bool x11_paste_incr_failure;        ///< INCR failure indicator
+
 	XIM x11_im;                         ///< Input method
 	XIC x11_ic;                         ///< Input method context
 	XFontSet x11_im_fontset;            ///< Fonts for positional preediting
 	XIMStyle x11_im_style;              ///< Negotiated input method style
 	XPoint x11_im_spot;                 ///< Last reported input caret baseline
 	unsigned x11_im_spot_set;           ///< x11_im_spot has been reported
-	Display *dpy;                       ///< X display handle
-	struct poller_fd x11_event;         ///< X11 events on wire
-	struct poller_idle xpending_event;  ///< X11 events possibly in I/O queues
-	int xkb_base_event_code;            ///< Xkb base event code
-	Window x11_window;                  ///< Application window
+
 	Window x11_embed_socket;            ///< Socket for an embedded X11 client
 	Window x11_embed_plug;              ///< Embedded X11 client window
 	bool x11_embed_active;              ///< Outer X11 window is active
@@ -818,14 +836,8 @@ struct xui
 	int x11_embed_top;                  ///< Embedded socket's top border
 	int x11_embed_right;                ///< Embedded socket's right border
 	int x11_embed_bottom;               ///< Embedded socket's bottom border
-	Pixmap x11_pixmap;                  ///< Off-screen bitmap
-	Region x11_clip;                    ///< Invalidated region
-	Picture x11_pixmap_picture;         ///< XRender wrap for x11_pixmap
-	XftDraw *xft_draw;                  ///< Xft rendering context
-	struct x11_font *xft_fonts;         ///< Font collection
-	char *x11_selection;                ///< CLIPBOARD selection
-	struct xdg_xsettings x11_xsettings; ///< XSETTINGS
 
+	struct xdg_xsettings x11_xsettings; ///< XSETTINGS
 	int32_t x11_double_click_time;      ///< Maximum delay for double clicks
 	int32_t x11_double_click_distance;  ///< Maximum distance for double clicks
 	const char *x11_fontname;           ///< Fontconfig font name
@@ -1156,6 +1168,8 @@ static struct ui tui_ui =
 	.symbol      = tui_make_symbol,
 	.gauge       = tui_make_gauge,
 	.scrollbar   = tui_make_scrollbar,
+
+	// TODO(p): We can handle bracketed paste via app_on_clipboard_paste.
 
 	.beep        = tui_beep,
 	.render      = tui_render,
@@ -1836,6 +1850,32 @@ x11_render_widget (struct widget *w, const XRectangle *clip)
 		x11_render_widget (child, &subclip);
 }
 
+#define X11_TIME_DIFFERENCE(a, b) ((uint32_t) ((a) - (b)))
+
+static void
+x11_request_clipboard (void)
+{
+	// Don't try to process two things at once.  Each request gets a few seconds
+	// to finish, then we move on, hoping that a property race doesn't commence.
+	if (!g_xui.x11_timestamp || (g_xui.x11_paste_in_progress &&
+		X11_TIME_DIFFERENCE
+			(g_xui.x11_timestamp, g_xui.x11_paste_in_progress) < 5000))
+		return;
+
+	Atom xa_clipboard = XInternAtom (g_xui.dpy, "CLIPBOARD", False);
+	// Most modern applications support this, though Xlib can easily convert.
+	Atom xa_utf8 = XInternAtom (g_xui.dpy, "UTF8_STRING", False);
+
+	// ICCCM says we should ensure the named property doesn't exist
+	XDeleteProperty (g_xui.dpy, g_xui.x11_window, xa_clipboard);
+
+	XConvertSelection (g_xui.dpy, xa_clipboard, xa_utf8, xa_clipboard,
+		g_xui.x11_window, g_xui.x11_timestamp);
+
+	g_xui.x11_paste_in_progress = g_xui.x11_timestamp;
+	g_xui.x11_paste_incr = false;
+}
+
 static void
 x11_beep (void)
 {
@@ -1924,6 +1964,7 @@ x11_destroy (void)
 	LIST_FOR_EACH (struct x11_font, font, g_xui.xft_fonts)
 		x11_font_destroy (font);
 	cstr_set (&g_xui.x11_selection, NULL);
+	str_free (&g_xui.x11_paste_buffer);
 	xdg_xsettings_free (&g_xui.x11_xsettings);
 
 	free (g_xui.x_fg);
@@ -1943,6 +1984,8 @@ static struct ui x11_ui =
 	.symbol      = x11_make_symbol,
 	.gauge       = x11_make_gauge,
 	.scrollbar   = x11_make_scrollbar,
+
+	.request_clipboard = x11_request_clipboard,
 
 	.beep        = x11_beep,
 	.render      = x11_render,
@@ -2127,7 +2170,7 @@ x11_find_text (struct widget *list, int x, int y)
 static bool
 x11_process_press (int x, int y, int button, int modifiers)
 {
-	if (button != Button3)
+	if (button != Button3 || !g_xui.x11_timestamp)
 		goto out;
 
 	char *text = x11_find_text (g_xui.widgets, x, y);
@@ -2139,7 +2182,7 @@ x11_process_press (int x, int y, int button, int modifiers)
 
 	cstr_set (&g_xui.x11_selection, text);
 	XSetSelectionOwner (g_xui.dpy, XInternAtom (g_xui.dpy, "CLIPBOARD", False),
-		g_xui.x11_window, CurrentTime);
+		g_xui.x11_window, g_xui.x11_timestamp);
 	app_on_clipboard_copy (g_xui.x11_selection);
 	return true;
 
@@ -2197,6 +2240,106 @@ on_x11_input_event (XEvent *ev)
 		return app_process_mouse
 			(TERMO_MOUSE_RELEASE, x, y, button, modifiers);
 	return false;
+}
+
+static bool
+x11_read_selection_property (Window wid, Atom property, bool *empty)
+{
+	Atom xa_utf8 = XInternAtom (g_xui.dpy, "UTF8_STRING", False);
+
+	long offset = 0;
+	bool more_data = true, ok = true;
+	while (ok && more_data)
+	{
+		Atom type = None;
+		int format = 0;
+		unsigned long nitems = 0, bytes_after = 0;
+		unsigned char *data = NULL;
+		if (XGetWindowProperty (g_xui.dpy, wid, property, offset, 0x8000,
+			False /* delete */, AnyPropertyType, &type, &format,
+			&nitems, &bytes_after, &data) != Success)
+			return false;
+
+		if (offset == 0 && nitems == 0 && empty)
+			*empty = true;
+
+		more_data = bytes_after != 0;
+		if ((ok = type == xa_utf8 && format == 8))
+		{
+			offset += (long) (nitems >> 2);
+			str_append_data (&g_xui.x11_paste_buffer, data, nitems);
+		}
+		XFree (data);
+	}
+	return ok;
+}
+
+static void
+on_x11_selection_notify (XSelectionEvent *ev)
+{
+	Atom xa_clipboard = XInternAtom (g_xui.dpy, "CLIPBOARD", False);
+	Atom xa_incr = XInternAtom (g_xui.dpy, "INCR", False);
+	if (ev->selection != xa_clipboard
+	 || ev->time != g_xui.x11_paste_in_progress)
+		return;
+
+	// TODO(p): Perhaps report failures to the application as well.
+	g_xui.x11_paste_in_progress = 0;
+	if (ev->property == None)
+		return;
+
+	Atom type = None;
+	int format = 0;
+	unsigned long nitems = 0, bytes_after = 0;
+	unsigned char *data = NULL;
+	if (XGetWindowProperty (g_xui.dpy, ev->requestor, ev->property,
+		0, 0, False /* delete */, AnyPropertyType, &type, &format,
+		&nitems, &bytes_after, &data) != Success)
+		goto out;
+	XFree (data);
+
+	str_reset (&g_xui.x11_paste_buffer);
+
+	// When you select a lot of text in VIM, it starts the ICCCM INCR mechanism,
+	// from which there is no opt-out.
+	if (type == xa_incr)
+	{
+		g_xui.x11_paste_in_progress = ev->time;
+		g_xui.x11_paste_incr = true;
+		g_xui.x11_paste_incr_failure = false;
+	}
+	else if (x11_read_selection_property (ev->requestor, ev->property, NULL))
+		app_on_clipboard_paste (g_xui.x11_paste_buffer.str);
+out:
+	XDeleteProperty (g_xui.dpy, g_xui.x11_window, ev->property);
+}
+
+static void
+on_x11_property_notify (XPropertyEvent *ev)
+{
+	Atom xa_clipboard = XInternAtom (g_xui.dpy, "CLIPBOARD", False);
+	if (!g_xui.x11_paste_incr
+	 || ev->window != g_xui.x11_window
+	 || ev->state != PropertyNewValue
+	 || ev->atom != xa_clipboard)
+		return;
+
+	bool empty = false;
+	if (!x11_read_selection_property (ev->window, ev->atom, &empty))
+		// We need to keep deleting the property.
+		g_xui.x11_paste_incr_failure = true;
+
+	// Once it's empty, we've consumed everything and can move on undisturbed.
+	if (empty)
+	{
+		if (!g_xui.x11_paste_incr_failure)
+			app_on_clipboard_paste (g_xui.x11_paste_buffer.str);
+
+		g_xui.x11_paste_in_progress = 0;
+		g_xui.x11_paste_incr = false;
+	}
+
+	XDeleteProperty (g_xui.dpy, ev->window, ev->atom);
 }
 
 static void
@@ -2581,9 +2724,41 @@ x11_embed_process_event (XEvent *event)
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+static Time
+x11_event_timestamp (const XEvent *ev)
+{
+	switch (ev->type)
+	{
+	case KeyPress:
+	case KeyRelease:
+		return ev->xkey.time;
+	case ButtonPress:
+	case ButtonRelease:
+		return ev->xbutton.time;
+	case MotionNotify:
+		return ev->xmotion.time;
+	case EnterNotify:
+	case LeaveNotify:
+		return ev->xcrossing.time;
+	case PropertyNotify:
+		return ev->xproperty.time;
+	case SelectionClear:
+		return ev->xselectionclear.time;
+	default:
+		return 0;
+	}
+}
+
 static void
 on_x11_event (XEvent *ev)
 {
+	// X11 timestamps are wrapping 32-bit values.  Ignore CurrentTime and
+	// events older than the latest one we've already processed.
+	Time timestamp = x11_event_timestamp (ev);
+	if (timestamp && (!g_xui.x11_timestamp ||
+		X11_TIME_DIFFERENCE (timestamp, g_xui.x11_timestamp) < UINT32_MAX / 2))
+		g_xui.x11_timestamp = timestamp;
+
 	if (x11_embed_process_event (ev))
 		return;
 
@@ -2613,11 +2788,17 @@ on_x11_event (XEvent *ev)
 		XftDrawChange (g_xui.xft_draw, g_xui.x11_pixmap);
 		xui_invalidate ();
 		break;
-	case SelectionRequest:
-		on_x11_selection_request (&ev->xselectionrequest);
+	case PropertyNotify:
+		on_x11_property_notify (&ev->xproperty);
 		break;
 	case SelectionClear:
 		cstr_set (&g_xui.x11_selection, NULL);
+		break;
+	case SelectionRequest:
+		on_x11_selection_request (&ev->xselectionrequest);
+		break;
+	case SelectionNotify:
+		on_x11_selection_notify (&ev->xselection);
 		break;
 	// UnmapNotify can be received when restarting the window manager.
 	// Should this turn out to be unreliable (window not destroyed by WM
@@ -2891,7 +3072,8 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	{
 		.event_mask = StructureNotifyMask | ExposureMask | FocusChangeMask
 			| KeyPressMask | KeyReleaseMask
-			| ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
+			| ButtonPressMask | ButtonReleaseMask | Button1MotionMask
+			| PropertyChangeMask,
 		.bit_gravity = NorthWestGravity,
 		.background_pixel = default_bg.pixel,
 	};
@@ -2948,6 +3130,7 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 
 	x11_init_pixmap ();
 	g_xui.xft_draw = XftDrawCreate (g_xui.dpy, g_xui.x11_pixmap, visual, cmap);
+	g_xui.x11_paste_buffer = str_make ();
 	g_xui.ui = &x11_ui;
 
 	XMapWindow (g_xui.dpy, g_xui.x11_window);
@@ -3243,6 +3426,23 @@ appkit_render_widget (struct widget *w, NSRect clip)
 }
 
 static void
+appkit_request_clipboard (void)
+{
+	@autoreleasepool
+	{
+		NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+		NSString *string = [pasteboard stringForType:NSPasteboardTypeString];
+		// TODO(p): Perhaps report failures to the application as well.
+		if (!string)
+			return;
+
+		const char *text = [string UTF8String];
+		if (text)
+			app_on_clipboard_paste (text);
+	}
+}
+
+static void
 appkit_beep (void)
 {
 	NSBeep ();
@@ -3305,6 +3505,8 @@ static struct ui appkit_ui =
 	.symbol      = appkit_make_symbol,
 	.gauge       = appkit_make_gauge,
 	.scrollbar   = appkit_make_scrollbar,
+
+	.request_clipboard = appkit_request_clipboard,
 
 	.beep        = appkit_beep,
 	.render      = appkit_render,
