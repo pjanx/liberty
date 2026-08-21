@@ -2085,8 +2085,13 @@ on_x11_keypress (XEvent *e)
 		key.modifiers |= TERMO_KEYMOD_SHIFT;
 	if (ev->state & ControlMask)
 		key.modifiers |= TERMO_KEYMOD_CTRL;
+
+	// XXX: The Mod keys are speculative, we should match them through XKB
+	//   (XkbGetMap, XkbGetNames, <Alt, Super>, XkbFreeKeyboard).
 	if (ev->state & Mod1Mask)
 		key.modifiers |= TERMO_KEYMOD_ALT;
+	if (ev->state & Mod4Mask)
+		return false;
 
 	if (keysym >= XK_F1 && keysym <= XK_F35)
 	{
