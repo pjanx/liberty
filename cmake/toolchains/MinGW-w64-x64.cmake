@@ -6,7 +6,7 @@ set (CMAKE_CXX_COMPILER "x86_64-w64-mingw32-g++")
 set (CMAKE_RC_COMPILER "x86_64-w64-mingw32-windres")
 
 # Remember to set WINEPATH for library dependencies
-set (CMAKE_CROSSCOMPILING_EMULATOR "wine64")
+set (CMAKE_CROSSCOMPILING_EMULATOR "wine")
 
 set (CMAKE_FIND_ROOT_PATH "/usr/x86_64-w64-mingw32")
 
