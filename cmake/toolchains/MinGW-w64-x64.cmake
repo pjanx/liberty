@@ -4,6 +4,7 @@ set (CMAKE_SYSTEM_PROCESSOR "x86_64")
 set (CMAKE_C_COMPILER "x86_64-w64-mingw32-gcc")
 set (CMAKE_CXX_COMPILER "x86_64-w64-mingw32-g++")
 set (CMAKE_RC_COMPILER "x86_64-w64-mingw32-windres")
+set (CMAKE_OBJDUMP "x86_64-w64-mingw32-objdump")
 
 # Remember to set WINEPATH for library dependencies
 set (CMAKE_CROSSCOMPILING_EMULATOR "wine")
