@@ -69,6 +69,10 @@ enum { XUI_KEYMOD_DOUBLE_CLICK = 1 << 15 };
 #include <X11/XKBlib.h>
 #include <X11/Xft/Xft.h>
 
+#ifdef LIBERTY_XUI_WANT_LCMS2
+#include <lcms2.h>
+#endif  // LIBERTY_XUI_WANT_LCMS2
+
 #define LIBERTY_XDG_WANT_X11
 #define LIBERTY_XDG_WANT_ICONS
 #include "liberty-xdg.c"
@@ -2950,6 +2954,54 @@ x11_init_attributes (struct attrs *attrs, size_t attrs_len)
 
 		attrs[a].attrs |= COLOR_PAIR (a + 1);
 	}
+
+#ifdef LIBERTY_XUI_WANT_LCMS2
+	// Disrespecting other monitors, and not watching for changes.
+	Atom atom = XInternAtom (g_xui.dpy, "_ICC_PROFILE", False);
+	// The type should be XA_CARDINAL, but we don't especially care.
+	Atom type = None;
+
+	int format = 0;
+	unsigned long nitems = 0, bytes_after = 0;
+	unsigned char *data = NULL;
+	Window root = RootWindow (g_xui.dpy, DefaultScreen (g_xui.dpy));
+	if (XGetWindowProperty (g_xui.dpy, root, atom, 0, 8 << 20 /* MiB */,
+		False /* delete */, AnyPropertyType, &type, &format,
+		&nitems, &bytes_after, &data) != Success)
+		return;
+	if (format != 8 || !nitems || bytes_after)
+		goto fail1;
+
+	cmsContext ctx = cmsCreateContext (NULL, &g_xui);
+	if (!ctx)
+		goto fail1;
+
+	cmsHPROFILE sRGB = cmsCreate_sRGBProfileTHR (ctx);
+	cmsHPROFILE monitor = cmsOpenProfileFromMemTHR (ctx, data, nitems);
+	if (!sRGB || !monitor)
+		goto fail2;
+
+	// Side-note: Little CMS 2.16 seems to transform from PREMUL wrong.
+	cmsHTRANSFORM xform = cmsCreateTransformTHR (ctx,
+		sRGB, TYPE_RGBA_16_PREMUL,
+		monitor, TYPE_RGBA_16_PREMUL, INTENT_PERCEPTUAL, 0);
+	if (!xform)
+		goto fail2;
+
+	for (size_t a = 0; a < attrs_len; a++)
+	{
+		cmsDoTransform (xform, &g_xui.x_fg[a], &g_xui.x_fg[a], 1);
+		cmsDoTransform (xform, &g_xui.x_bg[a], &g_xui.x_bg[a], 1);
+	}
+
+	cmsDeleteTransform (xform);
+fail2:
+	cmsCloseProfile (monitor);
+	cmsCloseProfile (sRGB);
+	cmsDeleteContext (ctx);
+fail1:
+	XFree (data);
+#endif  // LIBERTY_XUI_WANT_LCMS2
 }
 
 static XIMStyle
