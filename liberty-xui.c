@@ -809,6 +809,8 @@ struct xui
 	struct poller_fd x11_event;         ///< X11 events on wire
 	struct poller_idle xpending_event;  ///< X11 events possibly in I/O queues
 	int xkb_base_event_code;            ///< Xkb base event code
+	unsigned int x11_alt_mask;          ///< XKB modifier mask for Alt
+	unsigned int x11_super_mask;        ///< XKB modifier mask for Super
 	Window x11_window;                  ///< Application window
 	Time x11_timestamp;                 ///< Most recent X server timestamp
 
@@ -2071,6 +2073,19 @@ x11_convert_keysym (KeySym keysym)
 	return TERMO_SYM_UNKNOWN;
 }
 
+static int
+x11_state_to_modifiers (unsigned int state)
+{
+	int modifiers = 0;
+	if (state & ShiftMask)
+		modifiers |= TERMO_KEYMOD_SHIFT;
+	if (state & ControlMask)
+		modifiers |= TERMO_KEYMOD_CTRL;
+	if (state & g_xui.x11_alt_mask)
+		modifiers |= TERMO_KEYMOD_ALT;
+	return modifiers;
+}
+
 static bool
 on_x11_keypress (XEvent *e)
 {
@@ -2085,16 +2100,8 @@ on_x11_keypress (XEvent *e)
 		print_warning ("input method overflow");
 
 	termo_key_t key = {};
-	if (ev->state & ShiftMask)
-		key.modifiers |= TERMO_KEYMOD_SHIFT;
-	if (ev->state & ControlMask)
-		key.modifiers |= TERMO_KEYMOD_CTRL;
-
-	// XXX: The Mod keys are speculative, we should match them through XKB
-	//   (XkbGetMap, XkbGetNames, <Alt, Super>, XkbFreeKeyboard).
-	if (ev->state & Mod1Mask)
-		key.modifiers |= TERMO_KEYMOD_ALT;
-	if (ev->state & Mod4Mask)
+	key.modifiers = x11_state_to_modifiers (ev->state);
+	if (ev->state & g_xui.x11_super_mask)
 		return false;
 
 	if (keysym >= XK_F1 && keysym <= XK_F35)
@@ -2197,16 +2204,6 @@ x11_process_press (int x, int y, int button, int modifiers)
 
 out:
 	return app_process_mouse (TERMO_MOUSE_PRESS, x, y, button, modifiers);
-}
-
-static int
-x11_state_to_modifiers (unsigned int state)
-{
-	int modifiers = 0;
-	if (state & ShiftMask)    modifiers |= TERMO_KEYMOD_SHIFT;
-	if (state & ControlMask)  modifiers |= TERMO_KEYMOD_CTRL;
-	if (state & Mod1Mask)     modifiers |= TERMO_KEYMOD_ALT;
-	return modifiers;
 }
 
 static bool
@@ -3071,6 +3068,26 @@ x11_init_input_context (void)
 }
 
 static void
+x11_init_modifiers (void)
+{
+	g_xui.x11_alt_mask = Mod1Mask;
+	g_xui.x11_super_mask = Mod4Mask;
+	XkbDescPtr xkb = XkbGetMap (g_xui.dpy, XkbAllComponentsMask, XkbUseCoreKbd);
+	if (!xkb || XkbGetNames (g_xui.dpy, XkbVirtualModNamesMask, xkb) != Success)
+		goto fail;
+
+	Atom alt = XInternAtom (g_xui.dpy, "Alt", False);
+	Atom super = XInternAtom (g_xui.dpy, "Super", False);
+	for (unsigned i = 0; i < XkbNumVirtualMods; i++)
+		if (xkb->names->vmods[i] == alt)
+			XkbVirtualModsToReal (xkb, 1 << i, &g_xui.x11_alt_mask);
+		else if (xkb->names->vmods[i] == super)
+			XkbVirtualModsToReal (xkb, 1 << i, &g_xui.x11_super_mask);
+fail:
+	XkbFreeKeyboard (xkb, XkbAllComponentsMask, True);
+}
+
+static void
 x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 {
 	// https://tedyin.com/posts/a-brief-intro-to-linux-input-method-framework/
@@ -3081,6 +3098,7 @@ x11_init (struct poller *poller, struct attrs *app_attrs, size_t app_attrs_len)
 	if (!(g_xui.dpy = XkbOpenDisplay
 		(NULL, &g_xui.xkb_base_event_code, NULL, NULL, NULL, NULL)))
 		exit_fatal ("cannot open display");
+	x11_init_modifiers ();
 	if (!XftInit (NULL))
 		print_warning ("Fontconfig initialization failed");
 	if (!XftDefaultHasRender (g_xui.dpy))
