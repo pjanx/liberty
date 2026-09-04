@@ -831,7 +831,8 @@ struct xui
 	XFontSet x11_im_fontset;            ///< Fonts for positional preediting
 	XIMStyle x11_im_style;              ///< Negotiated input method style
 	XPoint x11_im_spot;                 ///< Last reported input caret baseline
-	unsigned x11_im_spot_set;           ///< x11_im_spot has been reported
+	bool x11_im_spot_set;               ///< x11_im_spot has been sent
+	bool x11_im_spot_reported;          ///< A caret was reported while rendering
 
 	Window x11_embed_socket;            ///< Socket for an embedded X11 client
 	Window x11_embed_plug;              ///< Embedded X11 client window
@@ -1895,13 +1896,15 @@ x11_set_cursor (int x, int y)
 	if (!(g_xui.x11_im_style & XIMPreeditPosition))
 		return;
 
+	g_xui.x11_im_spot_reported = true;
+
 	XPoint spot = { x, y };
-	if (g_xui.x11_im_spot_set++
+	if (g_xui.x11_im_spot_set
 	 && g_xui.x11_im_spot.x == spot.x && g_xui.x11_im_spot.y == spot.y)
 		return;
 
 	g_xui.x11_im_spot = spot;
-	g_xui.x11_im_spot_set = 1;
+	g_xui.x11_im_spot_set = true;
 	XVaNestedList preedit =
 		XVaCreateNestedList (0, XNSpotLocation, &spot, NULL);
 	if (!preedit)
@@ -1925,7 +1928,7 @@ x11_render (void)
 	XRenderFillRectangle (g_xui.dpy, PictOpSrc, g_xui.x11_pixmap_picture,
 		&x11_default_bg, 0, 0, g_xui.width, g_xui.height);
 
-	unsigned spot_set = g_xui.x11_im_spot_set;
+	g_xui.x11_im_spot_reported = false;
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
 		x11_render_widget (w, NULL);
 
@@ -1935,7 +1938,7 @@ x11_render (void)
 
 	// IBus needs to have the spot placed somewhere,
 	// or it may end up on another display.
-	if (g_xui.x11_im_spot_set == spot_set)
+	if (!g_xui.x11_im_spot_reported)
 		x11_set_cursor (0, g_xui.height);
 }
 
@@ -2822,6 +2825,7 @@ on_x11_event (XEvent *ev)
 
 		x11_embed_set_active (true);
 		XSetICFocus (g_xui.x11_ic);
+
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = true;
 		xui_process_termo_event (&key);
@@ -2834,6 +2838,8 @@ on_x11_event (XEvent *ev)
 			break;
 
 		x11_embed_set_active (false);
+		XUnsetICFocus (g_xui.x11_ic);
+
 		key.type = TERMO_TYPE_FOCUS;
 		key.code.focused = false;
 		xui_process_termo_event (&key);
@@ -3006,9 +3012,8 @@ x11_choose_input_style (void)
 {
 	static const XIMStyle preferred[] =
 	{
-		// TODO: Preedit positioning needs fixing.
-//		XIMPreeditPosition | XIMStatusNothing,
-//		XIMPreeditPosition | XIMStatusNone,
+		XIMPreeditPosition | XIMStatusNothing,
+		XIMPreeditPosition | XIMStatusNone,
 		XIMPreeditNothing  | XIMStatusNothing,
 		XIMPreeditNothing  | XIMStatusNone,
 	};
