@@ -1372,13 +1372,10 @@ x11_font_open (unsigned style)
 	if (style & X11_FONT_ITALIC)
 		FcPatternAddInteger (pattern, FC_SLANT, FC_SLANT_ITALIC);
 
-	FcPattern *substituted = FcPatternDuplicate (pattern);
-	FcConfigSubstitute (NULL, substituted, FcMatchPattern);
-
+	// XftFontMatch() runs FcConfigSubstitute() on the pattern internally.
 	FcResult result = 0;
 	FcPattern *match = XftFontMatch (g_xui.dpy,
-		DefaultScreen (g_xui.dpy), substituted, &result);
-	FcPatternDestroy (substituted);
+		DefaultScreen (g_xui.dpy), pattern, &result);
 	struct x11_font_link *link = NULL;
 	if (!match || !(link = x11_font_link_open (match)))
 	{
@@ -1420,7 +1417,6 @@ x11_font_cover_codepoint (struct x11_font *self, ucs4_t cp)
 	FcCharSetAddChar (set, cp);
 	FcPattern *needle = FcPatternDuplicate (self->pattern);
 	FcPatternAddCharSet (needle, FC_CHARSET, set);
-	FcConfigSubstitute (NULL, needle, FcMatchPattern);
 
 	FcResult result = 0;
 	FcPattern *match
