@@ -165,7 +165,9 @@ function codegen_struct_field(d, cg,    f, dispose, serialize, deserialize) {
 	}
 
 	append(cg, "deserialize", sprintf(CodegenDeserialize["u32"], f "_len") \
-		"\tif (!(" f " = calloc(" f "_len + 1, sizeof *" f ")))\n" \
+		"\tif (" f "_len == SIZE_MAX)\n" \
+		"\t\treturn false;\n" \
+		"\tif (!(" f " = calloc(" f "_len + 1ull, sizeof *" f ")))\n" \
 		"\t\treturn false;\n")
 	if (d["type"] == "u8" || d["type"] == "i8") {
 		append(cg, "deserialize",
