@@ -164,8 +164,9 @@ function codegen_struct_field(d, cg,    f, dispose, serialize, deserialize) {
 			indent(sprintf(serialize, f "[i]")))
 	}
 
+	# Avoiding a compiler warning on platforms where SIZE_MAX > UINT32_MAX.
 	append(cg, "deserialize", sprintf(CodegenDeserialize["u32"], f "_len") \
-		"\tif (" f "_len == SIZE_MAX)\n" \
+		"\tif (" f "_len + 0ull == SIZE_MAX)\n" \
 		"\t\treturn false;\n" \
 		"\tif (!(" f " = calloc(" f "_len + 1ull, sizeof *" f ")))\n" \
 		"\t\treturn false;\n")
