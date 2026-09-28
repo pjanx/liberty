@@ -20,7 +20,7 @@ whatever is appropriate in their target language.
 
 Primitive data types
 ~~~~~~~~~~~~~~~~~~~~
-Like in XDR, all data is serialized in the network byte order, i.e., big-endian.
+Like in XDR, all data is serialized in network byte order, i.e. big-endian.
 
  * *void*: 0 bytes
 +
@@ -51,7 +51,7 @@ typeless integer constants:
 
  const VERSION = 1;
 
-The value can be either a name of another previously defined constant,
+The value can be either the name of a previously defined constant,
 or an immediate decimal value, which may not contain leading zeros.
 
 Enumerations
@@ -60,7 +60,7 @@ An *enum* is an *i8* with uniquely named values, in their own namespace.
 
 Values can be either specified explicitly, in the same way as with a constant,
 or they can be left implicit, in which case names assume a value that is one
-larger than their predecessor.  Zero is reserved for internal use, thus
+larger than their predecessor.  Zero is reserved for internal use.  Thus,
 enumerations implicitly begin with a value of one.  For example, these form
 a sequence from one to three:
 
@@ -80,7 +80,7 @@ definitions can be arbitrarily syntactically nested, as in C.
    u8 version;       // Version of this report.
    struct Item {
      Vehicle kind;   // The vehicle in question.
-     i32 count;      // How many vehicle of that kind there are.
+     i32 count;      // How many vehicles of that kind there are.
    } items<>;        // Reported items.
  };
 
@@ -98,7 +98,7 @@ and always-present field, which must be a tag *enum*:
 
 There is no *case* fall-through.
 Unless *default* is present, only the listed enumeration values are valid.
-Any *default* must currently be empty.
+Any *default* must currently be devoid of data.
 
 Framing
 -------

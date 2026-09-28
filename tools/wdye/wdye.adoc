@@ -35,7 +35,7 @@ is garbage-collected, unless *wait* has collected the process group leader.
 
 wdye.expect ([pattern1, ...])
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Waits until any pattern is ready, in order.
+Waits until any of the patterns is ready, in order.
 When no *timeout* (or *default*) patterns are included, one is added implicitly.
 
 The function returns the matching _pattern_'s values, while replacing
@@ -44,8 +44,8 @@ passing the matching _pattern_ as their sole argument.
 
 wdye.timeout {[timeout, ] [value1, ...]}
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Returns a new timeout _pattern_.  When no *timeout* is given, which is specified
-in seconds, a default timeout value is assumed.  Any further values
+Returns a new timeout _pattern_.  The *timeout* is specified in seconds.
+When none is given, a default timeout value is assumed.  Any further values
 are remembered to be later processed by *expect*.
 
 wdye.continue ()
@@ -55,21 +55,21 @@ all processing.
 
 PROCESS.buffer
 ~~~~~~~~~~~~~~
-A string with the _process_' current read buffer contents.
+A string with the _process_'s current read buffer contents.
 
 PROCESS.pid
 ~~~~~~~~~~~
-An integer with the _process_' process ID, or -1 if *wait* has collected it.
+An integer with the _process_'s process ID, or -1 if *wait* has collected it.
 
 PROCESS.term
 ~~~~~~~~~~~~
-A table with the _process_' *terminfo*(5) capabilities,
+A table with the _process_'s *terminfo*(5) capabilities,
 notably containing all **key_...** codes.
 This functionality may not be enabled, then this table will always be empty.
 
 PROCESS:send ([string, ...])
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Writes the given strings to the _process_' terminal slave,
+Writes the given strings to the _process_'s terminal slave,
 and returns the _process_ for method chaining.
 
 Beware of echoing and deadlocks, as only *expect* can read from the _process_,
@@ -85,7 +85,7 @@ When the *nocase* option is _true_, the expression will be matched
 case-insensitively.
 
 Unless the *notransfer* option is _true_, all data up until the end of the match
-will be erased from the _process_' read buffer upon a successful match.
+will be erased from the _process_'s read buffer upon a successful match.
 
 PROCESS:exact {literal [, nocase=true] [, notransfer=true] [, value1, ...]}
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

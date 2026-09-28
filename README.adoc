@@ -9,8 +9,8 @@ of as a successor to my other C library, libxtnd.
 You are supposed to import it as a git submodule and include the main source
 file directly everywhere you need it, setting feature flags as appropriate.
 Everything is declared "static".  I have come to the conclusion that this style
-of C programming suits me the best, as it allows me to nearly forget about the
-mess that are header files.
+of C programming suits me best, as it allows me to nearly forget about the mess
+that are header files.
 
 The API is intentionally unstable, which allows for easy refactoring.
 
@@ -53,12 +53,12 @@ lxdrgen-cpp-posix.cpp::
 lxdrgen-cpp-qt.cpp::
 lxdrgen-cpp-win32.cpp::
 	LibertyXDR backend for C++, primarily targeting Win32 and its wide strings.
-	Link the result together with one of the accompanied source files.
+	Link the result together with one of the accompanying source files.
 
 lxdrgen-go.awk::
 	LibertyXDR backend for Go, supporting _encoding/json_ interfaces.  It also
 	produces optimized JSON marshallers (however, note that the _json.Marshaler_
-	interface is bound to be underperforming, due to the amount of otherwise
+	interface is bound to be underperforming, due to the number of otherwise
 	avoidable memory allocations it necessitates).
 
 lxdrgen-mjs.awk::
