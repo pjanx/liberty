@@ -4109,8 +4109,9 @@ appkit_init (struct poller *poller, struct attrs *attrs, size_t attrs_len)
 	appkit_init_menu ();
 	[NSApp finishLaunching];
 
-	NSFont *system =
-		[NSFont systemFontOfSize:[NSFont systemFontSize]];
+	NSFont *system = [NSFont
+		monospacedDigitSystemFontOfSize:[NSFont systemFontSize]
+		weight:NSFontWeightRegular];
 	NSFont *mono =
 		[NSFont userFixedPitchFontOfSize:[NSFont systemFontSize]];
 	if (!mono)
