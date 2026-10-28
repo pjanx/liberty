@@ -4319,9 +4319,16 @@ xui_on_refresh (void *user_data)
 
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
 		widget_destroy (w);
-
 	g_xui.widgets = NULL;
-	app_layout ();
+
+#ifdef LIBERTY_XUI_WANT_APPKIT
+	@autoreleasepool
+	{
+#endif
+		app_layout ();
+#ifdef LIBERTY_XUI_WANT_APPKIT
+	}
+#endif
 
 	// Keep whatever the application gave them, for flexibility.
 	LIST_FOR_EACH (struct widget, w, g_xui.widgets)
