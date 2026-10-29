@@ -789,6 +789,7 @@ struct xui
 	int hunit;                          ///< Horizontal unit
 	int vunit;                          ///< Vertical unit
 	bool focused;                       ///< Whether the window has focus
+	bool hidden;                        ///< If the window might be invisible
 
 	// Terminal:
 
@@ -876,7 +877,7 @@ g_xui;
 static void
 xui_invalidate (void)
 {
-	if (!g_xui.tui_suspended)
+	if (!g_xui.tui_suspended && !g_xui.hidden)
 		poller_idle_set (&g_xui.refresh_event);
 }
 
@@ -3982,6 +3983,17 @@ appkit_send_focus_event (bool focused)
 {
 	(void) notification;
 	appkit_send_focus_event (false);
+}
+
+- (void) windowDidChangeOcclusionState:(NSNotification *)notification
+{
+	(void) notification;
+
+	bool hidden = !([g_xui.appkit_window occlusionState]
+		& NSWindowOcclusionStateVisible);
+	if (g_xui.hidden != hidden
+	 && !(g_xui.hidden = hidden))
+		xui_invalidate ();
 }
 
 @end
