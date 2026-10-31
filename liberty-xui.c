@@ -3555,6 +3555,7 @@ appkit_destroy (void)
 	g_xui.appkit_event.dispatcher (NULL);
 	poller_timer_reset (&g_xui.appkit_event);
 
+	[NSApp setDelegate:nil];
 	[g_xui.appkit_window setDelegate:nil];
 	[g_xui.appkit_delegate release];
 	g_xui.appkit_delegate = nil;
@@ -3952,10 +3953,42 @@ appkit_send_focus_event (bool focused)
 
 @end
 
-@interface XUIAppKitDelegate : NSObject <NSWindowDelegate>
+@interface XUIAppKitDelegate : NSObject
+	<NSApplicationDelegate, NSWindowDelegate>
 @end
 
 @implementation XUIAppKitDelegate
+
+- (void) applicationDidFinishLaunching:(NSNotification *)notification
+{
+	(void) notification;
+
+	// Processing a stop message needs an event.
+	[NSApp stop:nil];
+	[NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+		location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+		context:nil subtype:0 data1:0 data2:0] atStart:NO];
+}
+
+- (NSApplicationTerminateReply) applicationShouldTerminate:
+	(NSApplication *)sender
+{
+	(void) sender;
+
+	// Insisting on owning our event loop comes with a cost here:
+	//
+	//  - NSTerminateLater makes AppKit run a subloop, waiting for an answer.
+	//
+	//  - NSTerminateNow causes applicationWillTerminate, and then just exit(),
+	//    before we get a chance to return to the application's event loop.
+	//
+	//  - NSTerminateCancel would cancel system-initiated quits,
+	//    and even for basic quits it's not particularly clean.
+	//
+	// So this call is a XUI application's only chance to do non-atexit cleanup:
+	app_quit ();
+	return NSTerminateNow;
+}
 
 - (void) windowWillClose:(NSNotification *)notification
 {
@@ -4105,6 +4138,13 @@ appkit_init_menu (void)
 	[app_menu addItemWithTitle:@"Hide " PROGRAM_NAME
 		action:@selector (hide:)
 		keyEquivalent:@"h"];
+	[[app_menu addItemWithTitle:@"Hide Others"
+		action:@selector (hideOtherApplications:)
+		keyEquivalent:@"h"] setKeyEquivalentModifierMask:
+			NSEventModifierFlagOption | NSEventModifierFlagCommand];
+	[app_menu addItemWithTitle:@"Show All"
+		action:@selector (unhideAllApplications:)
+		keyEquivalent:@""];
 	[app_menu addItem:[NSMenuItem separatorItem]];
 	[app_menu addItemWithTitle:@"Quit " PROGRAM_NAME
 		action:@selector (terminate:)
@@ -4112,8 +4152,33 @@ appkit_init_menu (void)
 
 	NSMenuItem *app_menu_item = [[NSMenuItem new] autorelease];
 	[app_menu_item setSubmenu:app_menu];
+
+	// AppKit makes further changes to this menu.
+	NSMenu *window_menu = [[[NSMenu alloc] initWithTitle:@"Window"]
+		autorelease];
+	[window_menu addItemWithTitle:@"Minimize"
+		action:@selector (performMiniaturize:)
+		keyEquivalent:@"m"];
+	[window_menu addItemWithTitle:@"Zoom"
+		action:@selector (performZoom:)
+		keyEquivalent:@""];
+	[window_menu addItem:[NSMenuItem separatorItem]];
+	[[window_menu addItemWithTitle:@"Enter Full Screen"
+		action:@selector (toggleFullScreen:)
+		keyEquivalent:@"f"] setKeyEquivalentModifierMask:
+			NSEventModifierFlagControl | NSEventModifierFlagCommand];
+	[window_menu addItem:[NSMenuItem separatorItem]];
+	[window_menu addItemWithTitle:@"Bring All to Front"
+		action:@selector (arrangeInFront:)
+		keyEquivalent:@""];
+	[NSApp setWindowsMenu:window_menu];
+
+	NSMenuItem *window_menu_item = [[NSMenuItem new] autorelease];
+	[window_menu_item setSubmenu:window_menu];
+
 	NSMenu *menubar = [[NSMenu new] autorelease];
 	[menubar addItem:app_menu_item];
+	[menubar addItem:window_menu_item];
 	[NSApp setMainMenu:menubar];
 }
 
@@ -4124,7 +4189,16 @@ appkit_init (struct poller *poller, struct attrs *attrs, size_t attrs_len)
 	// Apparently this won't succeed when run from within a bundle.
 	(void) [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 	appkit_init_menu ();
-	[NSApp finishLaunching];
+
+	g_xui.appkit_delegate = [XUIAppKitDelegate new];
+	if (!g_xui.appkit_delegate)
+		[NSException raise:@"failed" format:@"failed to create delegate"];
+
+	// By at least shortly running the loop, AppKit allows us to order our
+	// windows front unconditionally, in particular when our Dock icon
+	// is clicked, and we used to be hidden.
+	[NSApp setDelegate:g_xui.appkit_delegate];
+	[NSApp run];
 
 	NSFont *system = [NSFont
 		monospacedDigitSystemFontOfSize:[NSFont systemFontSize]
@@ -4145,6 +4219,8 @@ appkit_init (struct poller *poller, struct attrs *attrs, size_t attrs_len)
 	g_xui.height = 24 * g_xui.vunit;
 	g_xui.width = g_xui.height * 4 / 3;
 
+	[NSWindow setAllowsAutomaticWindowTabbing:NO];
+
 	NSRect frame = NSMakeRect (0, 0, g_xui.width, g_xui.height);
 	NSWindowStyleMask style = NSWindowStyleMaskTitled
 		| NSWindowStyleMaskClosable
@@ -4164,10 +4240,6 @@ appkit_init (struct poller *poller, struct attrs *attrs, size_t attrs_len)
 	if (!g_xui.appkit_view)
 		[NSException raise:@"failed" format:@"failed to create view"];
 	[g_xui.appkit_window setContentView:g_xui.appkit_view];
-
-	g_xui.appkit_delegate = [XUIAppKitDelegate new];
-	if (!g_xui.appkit_delegate)
-		[NSException raise:@"failed" format:@"failed to create delegate"];
 	[g_xui.appkit_window setDelegate:g_xui.appkit_delegate];
 
 	[g_xui.appkit_window setAcceptsMouseMovedEvents:YES];
